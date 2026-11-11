@@ -1,0 +1,22 @@
+# Databricks Asset Bundle for the Airbnb US Northeast lakehouse.
+#
+#   databricks bundle validate
+#   databricks bundle deploy
+#   databricks bundle run airbnb_city_pipeline --params city=boston
+#
+# The workspace host comes from your Databricks CLI profile.
+bundle:
+  name: airbnb_lakehouse
+
+variables:
+  catalog:
+    description: Unity Catalog catalog that holds the airbnb_{bronze,silver,gold} schemas
+    default: workspace
+
+include:
+  - resources/*.yml
+
+targets:
+  dev:
+    mode: development
+    default: true

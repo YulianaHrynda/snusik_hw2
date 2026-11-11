@@ -1,0 +1,25 @@
+# Runs the same city pipeline for every city in the `cities` list (for_each, one city at a time:
+# the cities write to the same Delta tables, so sequential runs avoid commit conflicts on
+# first-time table creation).
+resources:
+  jobs:
+    airbnb_etl:
+      name: airbnb_etl
+      description: "airbnb_city_pipeline for each city in `cities`."
+      parameters:
+        - name: cities
+          default: '["boston", "jersey-city"]'
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: each_city
+          for_each_task:
+            inputs: "{{job.parameters.cities}}"
+            concurrency: 1
+            task:
+              task_key: city_pipeline
+              run_job_task:
+                job_id: ${resources.jobs.airbnb_city_pipeline.id}
+                job_parameters:
+                  city: "{{input}}"
+                  catalog: "{{job.parameters.catalog}}"

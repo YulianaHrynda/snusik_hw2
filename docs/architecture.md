@@ -68,8 +68,9 @@ flowchart LR
 
 | Job | Parameters | Tasks |
 |---|---|---|
-| `airbnb_city_pipeline` | `city`, `catalog` | `setup` → `bronze` → `silver` → `gold` |
-| `airbnb_train_price_model` | `train_cities`, `model_version`, `catalog` | `for_each` city → run `airbnb_city_pipeline`; then `train` (fits, evaluates on the test split, writes predictions + metrics, saves the model) |
+| `airbnb_city_pipeline` | `city`, `snapshot_date` (optional), `catalog` | `setup` → `bronze` → `silver` → `gold` |
+| `airbnb_etl` | `cities` (JSON list), `catalog` | `for_each` city → run `airbnb_city_pipeline` |
+| `airbnb_train_price_model` | `train_cities`, `model_version`, `catalog` | run `airbnb_etl` for the training cities; then `train` (fits, evaluates on the test split, writes predictions + metrics, saves the model) |
 | `airbnb_onboard_city` | `city`, `model_version`, `catalog` | run `airbnb_city_pipeline` for the new city → `score` with an existing model version |
 
 The same notebooks run unchanged locally on Spark 4 + Delta through

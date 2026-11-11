@@ -1,0 +1,13 @@
+# Local development / local runs of the Databricks notebooks (Python 3.12, Java 17).
+# On Databricks serverless everything except pyspark/delta is preinstalled.
+pyspark==4.0.1
+delta-spark==4.0.0
+pandas>=2.2
+numpy>=1.26
+scikit-learn>=1.5
+matplotlib>=3.8
+pyarrow>=15
+joblib>=1.4
+jupyter
+nbconvert
+jupytext
