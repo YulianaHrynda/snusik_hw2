@@ -11,3 +11,4 @@ joblib>=1.4
 jupyter
 nbconvert
 jupytext
+pyyaml>=6

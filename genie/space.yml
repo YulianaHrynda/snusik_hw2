@@ -1,0 +1,106 @@
+# Genie space over the gold tables. Applied with:  python genie/deploy_genie.py
+title: "Airbnb US Northeast — prices and price model (Snusik)"
+description: >
+  Ask about Airbnb listings, prices, neighbourhoods and hosts in Boston (city A), Jersey City
+  (city B) and New York City (city C, the new client), and about how well the price model works.
+  Prices are USD per night.
+
+tables:
+  - workspace.airbnb_gold.listings
+  - workspace.airbnb_gold.city_metrics
+  - workspace.airbnb_gold.neighbourhood_metrics
+  - workspace.airbnb_gold.price_predictions
+  - workspace.airbnb_gold.model_metrics
+
+instructions: |
+  - Cities. "City A" = Boston (city = 'boston'), "City B" = Jersey City (city = 'jersey-city'),
+    "City C" / "the new client" / "NYC" = New York City (city = 'new-york-city').
+    Filter on the `city` key, display `city_name`.
+  - Prices are advertised prices per night in USD. For any price statistic use only rows with
+    has_valid_price = true (this excludes listings without a price and implausible placeholder prices).
+  - "Typical price" or "price" without an aggregate means the MEDIAN: percentile(price, 0.5).
+    Only use AVG when the user explicitly asks for an average or mean.
+  - Room types: "entire home(s)" / "apartment" = room_type 'Entire home/apt';
+    "private room" = 'Private room'; "hotel room" = 'Hotel room'; "shared room" = 'Shared room'.
+  - "Monthly" or "long-stay" listings have monthly_stay = true (minimum stay of 28+ nights); their
+    nightly price is much lower than short-stay listings. Mention this when comparing prices.
+  - Neighbourhoods are in the `neighbourhood` column; in Jersey City they are council wards
+    (e.g. 'Ward E (councilmember James Solomon)').
+  - For counts of listings use workspace.airbnb_gold.listings (one row per listing). city_metrics and
+    neighbourhood_metrics are pre-aggregated: never sum their medians.
+  - Model questions use workspace.airbnb_gold.price_predictions joined to listings on (city, listing_id).
+    error = predicted_price - actual_price. Negative error = the model UNDER-prices the listing;
+    positive = OVER-prices. Only evaluate rows with is_trainable = true.
+    For training cities (city_role = 'training') evaluate on split = 'test' only; for the new city
+    (city_role = 'new') use all its rows.
+  - Use the most recent model_version unless the user names one: 'v2' for New York City if it exists, otherwise 'v1'.
+    'v1' is the original week-1 model; 'v2' is the model after the city C changes.
+  - MAE / accuracy questions: use model_metrics with scope = 'trainable'. split = 'test' for Boston,
+    Jersey City and city = 'ALL' (A and B together); split = 'all' for New York City.
+    baseline_mae is the median price for the same room type and number of guests.
+  - Never show host names together with prices of individual listings unless asked; never use SELECT *.
+
+example_sqls:
+  - question: "What is the median price of entire homes in City A?"
+    sql: |
+      SELECT percentile(price, 0.5) AS median_price, count(*) AS listings
+      FROM workspace.airbnb_gold.listings
+      WHERE city = 'boston' AND room_type = 'Entire home/apt' AND has_valid_price
+  - question: "Which neighbourhoods in City B have the most listings?"
+    sql: |
+      SELECT neighbourhood, count(*) AS listings
+      FROM workspace.airbnb_gold.listings
+      WHERE city = 'jersey-city'
+      GROUP BY neighbourhood
+      ORDER BY listings DESC
+  - question: "Where does the model under-price listings the most?"
+    sql: |
+      SELECT l.city_name, p.neighbourhood, count(*) AS listings,
+             round(avg(p.error), 1) AS mean_error_usd,
+             round(percentile(p.error, 0.5), 1) AS median_error_usd
+      FROM workspace.airbnb_gold.price_predictions p
+      JOIN workspace.airbnb_gold.listings l ON p.city = l.city AND p.listing_id = l.listing_id
+      WHERE p.is_trainable AND p.model_version = 'v1' AND p.city_role = 'training' AND p.split = 'test'
+      GROUP BY l.city_name, p.neighbourhood
+      HAVING count(*) >= 10
+      ORDER BY mean_error_usd ASC
+      LIMIT 10
+  - question: "How much better is the model than the baseline in each city?"
+    sql: |
+      SELECT city, model_version, split, n, round(baseline_mae, 1) AS baseline_mae, round(model_mae, 1) AS model_mae,
+             round(100 * mae_improvement_pct, 1) AS improvement_pct
+      FROM workspace.airbnb_gold.model_metrics
+      WHERE scope = 'trainable' AND split IN ('test', 'all') AND baseline_mae IS NOT NULL
+      ORDER BY model_version, city
+  - question: "Compare the median price of private rooms across cities"
+    sql: |
+      SELECT city_name, percentile(price, 0.5) AS median_price, count(*) AS listings
+      FROM workspace.airbnb_gold.listings
+      WHERE room_type = 'Private room' AND has_valid_price
+      GROUP BY city_name
+      ORDER BY median_price DESC
+  - question: "Which listings does the model over-price the most?"
+    sql: |
+      SELECT l.city_name, p.listing_id, p.room_type, p.neighbourhood, p.accommodates,
+             p.actual_price, p.predicted_price, p.error, l.listing_url
+      FROM workspace.airbnb_gold.price_predictions p
+      JOIN workspace.airbnb_gold.listings l ON p.city = l.city AND p.listing_id = l.listing_id
+      WHERE p.is_trainable AND p.model_version = 'v1' AND (p.split = 'test' OR p.city_role = 'new')
+      ORDER BY p.error DESC
+      LIMIT 10
+
+joins:
+  - left: workspace.airbnb_gold.price_predictions
+    right: workspace.airbnb_gold.listings
+    condition: "`price_predictions`.`city` = `listings`.`city` AND `price_predictions`.`listing_id` = `listings`.`listing_id`"
+    relationship: MANY_TO_ONE
+  - left: workspace.airbnb_gold.listings
+    right: workspace.airbnb_gold.city_metrics
+    condition: "`listings`.`city` = `city_metrics`.`city`"
+    relationship: MANY_TO_ONE
+
+sample_questions:
+  - "What is the median price of entire homes in City A?"
+  - "Which neighbourhoods in City B have the most listings?"
+  - "Where does the model under-price listings the most?"
+  - "How much better is the model than the baseline?"
