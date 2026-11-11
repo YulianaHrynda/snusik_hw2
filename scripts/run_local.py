@@ -142,14 +142,15 @@ def main(argv=None):
 
     p = sub.add_parser("train", help="mirror of job airbnb_train_price_model")
     p.add_argument("--train-cities", default="boston,jersey-city")
-    p.add_argument("--model-version", default="v1")
+    p.add_argument("--model-version", default="v2")
+    p.add_argument("--feature-set", default="comps", help='"v1" reproduces the week-1 model')
     p.add_argument("--model-name", default="auto")
     p.add_argument("--overwrite", default="false")
     p.add_argument("--skip-etl", action="store_true")
 
     p = sub.add_parser("onboard", help="mirror of job airbnb_onboard_city")
     p.add_argument("--city", required=True)
-    p.add_argument("--model-version", default="v1")
+    p.add_argument("--model-version", default="v2")
 
     p = sub.add_parser("notebook", help="run a single notebook")
     p.add_argument("path")
@@ -173,7 +174,7 @@ def main(argv=None):
                 for nb in CITY_PIPELINE:
                     run_notebook(spark, nb, {"city": city})
         run_notebook(spark, "src/model/01_train_price_model.py",
-                     {"train_cities": ",".join(cities), "model_version": args.model_version,
+                     {"train_cities": ",".join(cities), "model_version": args.model_version, "feature_set": args.feature_set,
                       "model_name": args.model_name, "overwrite": args.overwrite})
     elif args.cmd == "onboard":
         for nb in CITY_PIPELINE:

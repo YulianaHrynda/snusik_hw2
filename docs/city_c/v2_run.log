@@ -1,0 +1,74 @@
+26/11/11 21:24:27 ERROR HiveAlterHandler: Failed to alter table airbnb_gold.price_predictions
+26/11/11 21:24:29 ERROR HiveAlterHandler: Failed to alter table airbnb_gold.model_metrics
+=== src/model/01_train_price_model.py {'train_cities': 'boston,jersey-city', 'model_version': 'v2', 'feature_set': 'comps', 'model_name': 'auto', 'overwrite': 'false'}
+training cities: ['boston', 'jersey-city'] | model version: v2 | feature set: comps
+split        test  train
+city                    
+boston        626   2857
+jersey-city   432   1658
+           candidate  cv_mae_mean  cv_mae_std
+0       comps_hgb_l1    73.407978    2.990956
+1  comps_hgb_l1_deep    73.505589    2.967276
+2       comps_hgb_l2    73.639670    3.407392
+3        comps_ridge    82.286693    2.558278
+4           baseline   113.963533    3.074861
+chosen model: comps_hgb_l1
+   split       scope         city  ...  model_median_ae  model_mape  model_bias
+0   test   trainable       boston  ...            43.40    0.245062  -28.730048
+1   test   trainable  jersey-city  ...            26.04    0.217142  -19.903194
+2   test   trainable          ALL  ...            35.22    0.233662  -25.125888
+3  train   trainable       boston  ...            16.70    0.142930  -24.261432
+4  train   trainable  jersey-city  ...            11.79    0.137144  -11.716562
+5  train   trainable          ALL  ...            14.94    0.140805  -19.654700
+6   test  all_priced       boston  ...            43.40    0.245062  -28.730048
+7   test  all_priced  jersey-city  ...            26.31    0.218784  -23.823002
+8   test  all_priced          ALL  ...            35.23    0.234317  -26.723673
+[9 rows x 10 columns]
+                      feature  mae_increase       std
+0              comp_price_seg    118.505118  1.720188
+1          comp_log_price_seg     30.515036  1.539645
+2            rel_accommodates     15.550721  1.000743
+3                    bedrooms      9.521797  0.338560
+4                   bathrooms      7.529579  0.242284
+5              minimum_nights      6.279546  0.431328
+6                 bath_shared      4.374494  0.812735
+7      review_scores_location      3.769592  0.584809
+8                has_elevator      2.778226  0.284699
+9          comp_radius_km_seg      2.490581  0.332107
+10        host_listings_count      2.244069  0.338323
+11       comp_log_price_local      2.146125  0.285712
+12                n_amenities      2.000415  0.560374
+13                 host_years      1.511248  0.346024
+14              property_type      1.507425  0.156220
+15      comp_accommodates_seg      1.248270  0.254832
+16  review_scores_cleanliness      1.102392  0.305826
+17          number_of_reviews      1.076948  0.221914
+18  has_skyline_or_water_view      1.074696  0.098861
+19       review_scores_rating      1.039949  0.159046
+          city        room_type      n  model_mae  baseline_mae
+0       boston  Entire home/apt  436.0  96.421835    151.065161
+1       boston       Hotel room   20.0  69.010000    180.425000
+2       boston     Private room  169.0  53.582485    111.068462
+3       boston      Shared room    1.0  59.610000    314.000000
+4  jersey-city  Entire home/apt  283.0  87.848693    131.380177
+5  jersey-city     Private room  149.0  21.153557     41.356846
+saved ./.local_lakehouse/artifacts/models/v2/model.joblib
+spark_catalog.airbnb_gold.price_predictions: 6698 rows | spark_catalog.airbnb_gold.model_metrics: 14 rows
+=== done in 77s -> {"model_version": "v2", "model_name": "comps_hgb_l1", "test": {"boston": {"model_mae": 83.92, "baseline_mae": 141.47}, "jersey-city": {"model_mae": 64.85, "baseline_mae": 100.33}, "ALL": {"model_mae": 76.13, "baseline_mae": 124.67}}}
+26/11/11 21:24:44 ERROR HiveAlterHandler: Failed to alter table airbnb_gold.price_predictions
+26/11/11 21:24:45 ERROR HiveAlterHandler: Failed to alter table airbnb_gold.model_metrics
+=== src/model/02_score_city.py {'city': 'new-york-city', 'model_version': 'v2'}
+model v2: comps_hgb_l1 trained on ['boston', 'jersey-city'] at 2026-11-11T19:24:25+00:00
+input drift (> 5% of rows unseen / out of range): {
+ "host_listings_count": {
+  "out_of_range_share": 0.0797
+ }
+}
+new-york-city: 29918 listings scored as a new city
+  split       scope  ...  model_mape  model_bias
+0  test   trainable  ...    0.323906  -74.088277
+1   all   trainable  ...    0.318819  -69.603871
+2   all  all_priced  ...    0.321977  -92.910425
+[3 rows x 10 columns]
+spark_catalog.airbnb_gold.price_predictions: 29918 rows for new-york-city | spark_catalog.airbnb_gold.model_metrics: 3 rows
+=== done in 14s -> {"city": "new-york-city", "model_version": "v2", "metrics": {"test/trainable": {"n": 3814, "model_mae": 114.69884897745149, "baseline_mae": 164.15969847928682}, "all/trainable": {"n": 19295, "model_mae": 110.73122777921742, "baseline_mae": 159.00191655869395}, "all/all_priced": {"n": 19406, "model_mae": 133.80253787488405, "baseline_mae": 182.8778202617747}}}

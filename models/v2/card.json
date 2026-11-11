@@ -1,0 +1,391 @@
+{
+  "model_name": "comps_hgb_l1",
+  "features": [
+    "room_type",
+    "property_type",
+    "accommodates",
+    "bedrooms",
+    "beds",
+    "bathrooms",
+    "n_amenities",
+    "minimum_nights",
+    "host_listings_count",
+    "host_years",
+    "number_of_reviews",
+    "review_scores_rating",
+    "review_scores_cleanliness",
+    "review_scores_location",
+    "review_scores_value",
+    "comp_log_price_seg",
+    "comp_log_price_local",
+    "comp_accommodates_seg",
+    "comp_radius_km_seg",
+    "rel_accommodates",
+    "bath_shared",
+    "monthly_stay",
+    "host_is_superhost",
+    "host_identity_verified",
+    "has_reviews",
+    "has_air_conditioning",
+    "has_pool",
+    "has_hot_tub",
+    "has_gym",
+    "has_elevator",
+    "has_free_parking",
+    "has_washer",
+    "has_dishwasher",
+    "has_workspace",
+    "has_self_checkin",
+    "has_outdoor_space",
+    "has_skyline_or_water_view",
+    "pets_allowed",
+    "comp_price_seg"
+  ],
+  "feature_set": "comps",
+  "train_cities": [
+    "boston",
+    "jersey-city"
+  ],
+  "cv": [
+    {
+      "index": "comps_hgb_l1",
+      "cv_mae_mean": 73.4079781966487,
+      "cv_mae_std": 2.9909564594421503
+    },
+    {
+      "index": "comps_hgb_l1_deep",
+      "cv_mae_mean": 73.50558949568584,
+      "cv_mae_std": 2.967275929484366
+    },
+    {
+      "index": "comps_hgb_l2",
+      "cv_mae_mean": 73.63966962232996,
+      "cv_mae_std": 3.4073921617094327
+    },
+    {
+      "index": "comps_ridge",
+      "cv_mae_mean": 82.28669295166551,
+      "cv_mae_std": 2.558278149583701
+    },
+    {
+      "index": "baseline",
+      "cv_mae_mean": 113.96353266888153,
+      "cv_mae_std": 3.07486105842096
+    }
+  ],
+  "test_metrics": [
+    {
+      "model_version": "v2",
+      "model_name": "comps_hgb_l1",
+      "split": "test",
+      "scope": "trainable",
+      "city": "boston",
+      "n": 626,
+      "model_mae": 83.92199680511182,
+      "model_median_ae": 43.39999999999999,
+      "model_mape": 0.24506196394809074,
+      "model_within_25pct": 0.6309904153354633,
+      "model_bias": -28.73004792332268,
+      "baseline_mae": 141.4656230031949,
+      "baseline_median_ae": 87.14500000000001,
+      "baseline_mape": 0.44966083965105086,
+      "baseline_within_25pct": 0.33706070287539935,
+      "baseline_bias": -68.03335463258786,
+      "mae_improvement_pct": 0.40676755932982744
+    },
+    {
+      "model_version": "v2",
+      "model_name": "comps_hgb_l1",
+      "split": "test",
+      "scope": "trainable",
+      "city": "jersey-city",
+      "n": 432,
+      "model_mae": 64.84504629629629,
+      "model_median_ae": 26.040000000000006,
+      "model_mape": 0.21714150009138067,
+      "model_within_25pct": 0.6828703703703703,
+      "model_bias": -19.903194444444445,
+      "baseline_mae": 100.33046296296295,
+      "baseline_median_ae": 57.575,
+      "baseline_mape": 0.4938453210626098,
+      "baseline_within_25pct": 0.41203703703703703,
+      "baseline_bias": 8.63046296296296,
+      "mae_improvement_pct": 0.3536853675215884
+    },
+    {
+      "model_version": "v2",
+      "model_name": "comps_hgb_l1",
+      "split": "test",
+      "scope": "trainable",
+      "city": "ALL",
+      "n": 1058,
+      "model_mae": 76.13254253308128,
+      "model_median_ae": 35.220000000000006,
+      "model_mape": 0.23366154770414105,
+      "model_within_25pct": 0.6521739130434783,
+      "model_bias": -25.125888468809077,
+      "baseline_mae": 124.66941398865784,
+      "baseline_median_ae": 74.545,
+      "baseline_mape": 0.467702140189608,
+      "baseline_within_25pct": 0.3676748582230624,
+      "baseline_bias": -36.73017013232514,
+      "mae_improvement_pct": 0.3893246138141978
+    },
+    {
+      "model_version": "v2",
+      "model_name": "comps_hgb_l1",
+      "split": "test",
+      "scope": "all_priced",
+      "city": "boston",
+      "n": 626,
+      "model_mae": 83.92199680511182,
+      "model_median_ae": 43.39999999999999,
+      "model_mape": 0.24506196394809074,
+      "model_within_25pct": 0.6309904153354633,
+      "model_bias": -28.73004792332268,
+      "baseline_mae": 141.4656230031949,
+      "baseline_median_ae": 87.14500000000001,
+      "baseline_mape": 0.44966083965105086,
+      "baseline_within_25pct": 0.33706070287539935,
+      "baseline_bias": -68.03335463258786,
+      "mae_improvement_pct": 0.40676755932982744
+    },
+    {
+      "model_version": "v2",
+      "model_name": "comps_hgb_l1",
+      "split": "test",
+      "scope": "all_priced",
+      "city": "jersey-city",
+      "n": 433,
+      "model_mae": 68.66106235565819,
+      "model_median_ae": 26.309999999999974,
+      "model_mape": 0.21878388860403483,
+      "model_within_25pct": 0.6812933025404158,
+      "model_bias": -23.823002309468823,
+      "baseline_mae": 103.8062817551963,
+      "baseline_median_ae": 58.150000000000006,
+      "baseline_mape": 0.49470906535874914,
+      "baseline_within_25pct": 0.4110854503464203,
+      "baseline_bias": 4.903002309468821,
+      "mae_improvement_pct": 0.3385654394444084
+    },
+    {
+      "model_version": "v2",
+      "model_name": "comps_hgb_l1",
+      "split": "test",
+      "scope": "all_priced",
+      "city": "ALL",
+      "n": 1059,
+      "model_mae": 77.68216241737487,
+      "model_median_ae": 35.230000000000004,
+      "model_mape": 0.23431748177247583,
+      "model_within_25pct": 0.6515580736543909,
+      "model_bias": -26.723673276676113,
+      "baseline_mae": 126.06761095372994,
+      "baseline_median_ae": 74.71000000000001,
+      "baseline_mape": 0.468079991427664,
+      "baseline_within_25pct": 0.36732766761095376,
+      "baseline_bias": -38.211406987724274,
+      "mae_improvement_pct": 0.3838055482316848
+    }
+  ],
+  "feature_importance": [
+    {
+      "feature": "comp_price_seg",
+      "mae_increase": 118.50511790497367,
+      "std": 1.7201879827172013
+    },
+    {
+      "feature": "comp_log_price_seg",
+      "mae_increase": 30.515035766424937,
+      "std": 1.5396452212797913
+    },
+    {
+      "feature": "rel_accommodates",
+      "mae_increase": 15.550721076056396,
+      "std": 1.000743461745563
+    },
+    {
+      "feature": "bedrooms",
+      "mae_increase": 9.521797257253292,
+      "std": 0.3385595102953067
+    },
+    {
+      "feature": "bathrooms",
+      "mae_increase": 7.529578968006376,
+      "std": 0.24228421331271224
+    },
+    {
+      "feature": "minimum_nights",
+      "mae_increase": 6.2795464111676464,
+      "std": 0.43132843135340654
+    },
+    {
+      "feature": "bath_shared",
+      "mae_increase": 4.374494379658773,
+      "std": 0.812734764789985
+    },
+    {
+      "feature": "review_scores_location",
+      "mae_increase": 3.7695920180155413,
+      "std": 0.5848092251418658
+    },
+    {
+      "feature": "has_elevator",
+      "mae_increase": 2.7782263767910593,
+      "std": 0.2846985209701624
+    },
+    {
+      "feature": "comp_radius_km_seg",
+      "mae_increase": 2.4905812742319995,
+      "std": 0.3321067476708555
+    },
+    {
+      "feature": "host_listings_count",
+      "mae_increase": 2.2440690800865526,
+      "std": 0.3383231831740701
+    },
+    {
+      "feature": "comp_log_price_local",
+      "mae_increase": 2.1461245405120364,
+      "std": 0.28571164144922484
+    },
+    {
+      "feature": "n_amenities",
+      "mae_increase": 2.0004153692958058,
+      "std": 0.5603742112207482
+    },
+    {
+      "feature": "host_years",
+      "mae_increase": 1.5112484136562216,
+      "std": 0.34602409784755817
+    },
+    {
+      "feature": "property_type",
+      "mae_increase": 1.5074251277049313,
+      "std": 0.15621996019414897
+    },
+    {
+      "feature": "comp_accommodates_seg",
+      "mae_increase": 1.2482704143578274,
+      "std": 0.2548319479467861
+    },
+    {
+      "feature": "review_scores_cleanliness",
+      "mae_increase": 1.1023921727533463,
+      "std": 0.30582608785729487
+    },
+    {
+      "feature": "number_of_reviews",
+      "mae_increase": 1.076947507631567,
+      "std": 0.22191350490977235
+    },
+    {
+      "feature": "has_skyline_or_water_view",
+      "mae_increase": 1.0746960417290041,
+      "std": 0.09886140341093419
+    },
+    {
+      "feature": "review_scores_rating",
+      "mae_increase": 1.0399491370357736,
+      "std": 0.15904556637723918
+    },
+    {
+      "feature": "has_dishwasher",
+      "mae_increase": 0.8248122221124248,
+      "std": 0.3628748077783334
+    },
+    {
+      "feature": "room_type",
+      "mae_increase": 0.8079675867829081,
+      "std": 0.550792936163507
+    },
+    {
+      "feature": "beds",
+      "mae_increase": 0.688582507436007,
+      "std": 0.23788999637219885
+    },
+    {
+      "feature": "review_scores_value",
+      "mae_increase": 0.4299124269021434,
+      "std": 0.30116785309331623
+    },
+    {
+      "feature": "accommodates",
+      "mae_increase": 0.41110738517311063,
+      "std": 0.12888937851649493
+    },
+    {
+      "feature": "pets_allowed",
+      "mae_increase": 0.3721225044034611,
+      "std": 0.06129582151786542
+    },
+    {
+      "feature": "host_is_superhost",
+      "mae_increase": 0.2968705196254973,
+      "std": 0.07625590094970583
+    },
+    {
+      "feature": "has_washer",
+      "mae_increase": 0.1979051190262652,
+      "std": 0.13463736261626216
+    },
+    {
+      "feature": "has_gym",
+      "mae_increase": 0.1792358375920827,
+      "std": 0.05967704887553451
+    },
+    {
+      "feature": "host_identity_verified",
+      "mae_increase": 0.1715236299046893,
+      "std": 0.07168010197996898
+    },
+    {
+      "feature": "has_outdoor_space",
+      "mae_increase": 0.08767794623742305,
+      "std": 0.06453018577423755
+    },
+    {
+      "feature": "has_self_checkin",
+      "mae_increase": 0.04480789641646084,
+      "std": 0.04510681076552509
+    },
+    {
+      "feature": "has_free_parking",
+      "mae_increase": 0.0402610159146775,
+      "std": 0.026111018188302217
+    },
+    {
+      "feature": "has_pool",
+      "mae_increase": 0.02596526865087583,
+      "std": 0.014687647822438199
+    },
+    {
+      "feature": "has_hot_tub",
+      "mae_increase": 0.02508951711698728,
+      "std": 0.019808014397057535
+    },
+    {
+      "feature": "has_air_conditioning",
+      "mae_increase": 0.019165368600542364,
+      "std": 0.012247009939703336
+    },
+    {
+      "feature": "has_reviews",
+      "mae_increase": 0.0,
+      "std": 0.0
+    },
+    {
+      "feature": "monthly_stay",
+      "mae_increase": 0.0,
+      "std": 0.0
+    },
+    {
+      "feature": "has_workspace",
+      "mae_increase": -0.02317257262438659,
+      "std": 0.06273358094401492
+    }
+  ],
+  "sklearn_version": "1.9.1",
+  "created_at": "2026-11-11T19:24:25+00:00"
+}

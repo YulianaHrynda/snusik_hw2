@@ -3,16 +3,19 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 from datetime import datetime, timezone
 
 import joblib
 import numpy as np
 import pandas as pd
 import sklearn
+from sklearn.base import BaseEstimator, RegressorMixin, clone
 from sklearn.compose import ColumnTransformer, TransformedTargetRegressor
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import Ridge
+from sklearn.neighbors import BallTree
 from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
@@ -104,6 +107,133 @@ CANDIDATES = {
     "hgb_log_l2": lambda: make_hgb(loss="squared_error"),
     "hgb_log_l1": lambda: make_hgb(loss="absolute_error"),
     "hgb_log_l1_deep": lambda: make_hgb(loss="absolute_error", max_iter=800, max_leaf_nodes=63, learning_rate=0.03),
+}
+
+
+# ----------------------------------------------------------------------------- v2: market comps
+# Model change after city C (docs/city_c_report.md). v1 learned Boston/Jersey City location and
+# price *levels* (city, neighbourhood names, raw coordinates); none of that transfers. v2 drops
+# those features and anchors every prediction on comparable listings of the *same* city:
+#   prediction = comp_price_seg * exp(model(features))
+# so the price level comes from the local market and the model only learns relative adjustments.
+# Comps come from the city's training-split listings with a valid price, never from the listing
+# itself or from other listings of the same host.
+COMP_K_SEGMENT = 20     # nearest listings of the same room type and stay type
+COMP_K_LOCAL = 50       # nearest listings of any type (local market level)
+EARTH_RADIUS_KM = 6371.0088
+ANCHOR = "comp_price_seg"
+COMP_FEATURES = ["comp_log_price_seg", "comp_log_price_local", "comp_accommodates_seg", "comp_radius_km_seg",
+                 "rel_accommodates"]
+CATEGORICAL_V2 = ["room_type", "property_type"]
+NUMERIC_V2 = [c for c in NUMERIC if c not in ("latitude", "longitude")] + COMP_FEATURES
+FEATURES_V2 = CATEGORICAL_V2 + NUMERIC_V2 + BOOLEAN
+
+
+def segment(df: pd.DataFrame) -> pd.Series:
+    room = df["room_type"].map({"Entire home/apt": "entire", "Private room": "private"}).fillna("other")
+    stay = np.where(pd.to_numeric(df["monthly_stay"], errors="coerce").fillna(0) > 0.5, "monthly", "short")
+    return room + "_" + stay
+
+
+def _knn_comps(rows: pd.DataFrame, ref: pd.DataFrame, k: int, extra: int = 100) -> dict:
+    n = len(rows)
+    out = {"price": np.full(n, np.nan), "acc": np.full(n, np.nan), "radius": np.full(n, np.nan)}
+    has_xy = rows[["latitude", "longitude"]].notna().all(axis=1).to_numpy()
+    if len(ref) == 0 or not has_xy.any():
+        return out
+    tree = BallTree(np.radians(ref[["latitude", "longitude"]].to_numpy(dtype=float)), metric="haversine")
+    dist, idx = tree.query(np.radians(rows.loc[has_xy, ["latitude", "longitude"]].to_numpy(dtype=float)),
+                           k=min(len(ref), k + extra))
+    ok = ((ref["listing_id"].to_numpy()[idx] != rows["listing_id"].to_numpy()[has_xy][:, None])
+          & (ref["host_id"].to_numpy()[idx] != rows["host_id"].to_numpy()[has_xy][:, None]))
+    keep = ok & (np.cumsum(ok, axis=1) <= k)
+    with warnings.catch_warnings():  # rows without any usable comp stay NaN and get a fallback
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        out["price"][has_xy] = np.nanmedian(np.where(keep, ref["price"].to_numpy(dtype=float)[idx], np.nan), axis=1)
+        out["acc"][has_xy] = np.nanmedian(np.where(keep, ref["accommodates"].to_numpy(dtype=float)[idx], np.nan), axis=1)
+        out["radius"][has_xy] = np.nanmax(np.where(keep, dist * EARTH_RADIUS_KM, np.nan), axis=1)
+    return out
+
+
+def add_comps(df: pd.DataFrame) -> pd.DataFrame:
+    """Add market-comp features per city (expects prepared data with split/is_trainable/host_id)."""
+    out = df.copy()
+    out["segment"] = segment(out)
+    for c in (ANCHOR, "comp_price_local", "comp_accommodates_seg", "comp_radius_km_seg"):
+        out[c] = np.nan
+    is_ref = (out["split"].eq("train") & out["is_trainable"].astype(bool) & out["price"].notna()
+              & out[["latitude", "longitude"]].notna().all(axis=1))
+    for city, d in out.groupby("city"):
+        ref_city = d[is_ref.loc[d.index]]
+        if ref_city.empty:
+            raise ValueError(f"city '{city}' has no priced training-split listings to use as comps")
+        local = _knn_comps(d, ref_city, COMP_K_LOCAL)
+        out.loc[d.index, "comp_price_local"] = local["price"]
+        for seg, ds in d.groupby("segment"):
+            ref = ref_city[ref_city["segment"] == seg]
+            r = _knn_comps(ds, ref if len(ref) >= COMP_K_SEGMENT else ref_city, COMP_K_SEGMENT)
+            out.loc[ds.index, ANCHOR] = r["price"]
+            out.loc[ds.index, "comp_accommodates_seg"] = r["acc"]
+            out.loc[ds.index, "comp_radius_km_seg"] = r["radius"]
+        # fallbacks for rows without a usable comp: segment median, then city median
+        rows = out.index.isin(d.index)
+        seg_median = ref_city.groupby("segment")["price"].median()
+        city_median = ref_city["price"].median()
+        miss = rows & out[ANCHOR].isna()
+        if miss.any():
+            out.loc[miss, ANCHOR] = out.loc[miss, "segment"].map(seg_median).astype(float).fillna(city_median)
+        miss = rows & out["comp_price_local"].isna()
+        if miss.any():
+            out.loc[miss, "comp_price_local"] = float(city_median)
+    out["comp_log_price_seg"] = np.log(out[ANCHOR])
+    out["comp_log_price_local"] = np.log(out["comp_price_local"])
+    out["rel_accommodates"] = out["accommodates"] / out["comp_accommodates_seg"]
+    return out
+
+
+class CompsResidualModel(BaseEstimator, RegressorMixin):
+    """Fits log(price) - log(anchor); predicts anchor * exp(prediction)."""
+
+    def __init__(self, inner=None, anchor: str = ANCHOR):
+        self.inner = inner
+        self.anchor = anchor
+
+    def fit(self, X, y):
+        offset = np.log(X[self.anchor].to_numpy(dtype=float))
+        self.inner_ = clone(self.inner).fit(X, np.log(np.asarray(y, dtype=float)) - offset)
+        return self
+
+    def predict(self, X):
+        return np.exp(self.inner_.predict(X) + np.log(X[self.anchor].to_numpy(dtype=float)))
+
+
+def _hgb_inner(loss: str, max_iter: int = 400, max_leaf_nodes: int = 31, learning_rate: float = 0.05):
+    pre = ColumnTransformer([("cat", _onehot(), CATEGORICAL_V2), ("num", "passthrough", NUMERIC_V2 + BOOLEAN)])
+    hgb = HistGradientBoostingRegressor(loss=loss, max_iter=max_iter, max_leaf_nodes=max_leaf_nodes,
+                                        learning_rate=learning_rate, min_samples_leaf=20, l2_regularization=1.0,
+                                        early_stopping=False, random_state=RANDOM_STATE)
+    return Pipeline([("pre", pre), ("hgb", hgb)])
+
+
+def _ridge_inner(alpha: float = 3.0):
+    pre = ColumnTransformer([
+        ("cat", _onehot(), CATEGORICAL_V2),
+        ("num", make_pipeline(SimpleImputer(strategy="median", add_indicator=True), StandardScaler()),
+         NUMERIC_V2 + BOOLEAN),
+    ])
+    return Pipeline([("pre", pre), ("ridge", Ridge(alpha=alpha))])
+
+
+CANDIDATES_COMPS = {
+    "comps_ridge": lambda: CompsResidualModel(_ridge_inner()),
+    "comps_hgb_l2": lambda: CompsResidualModel(_hgb_inner("squared_error")),
+    "comps_hgb_l1": lambda: CompsResidualModel(_hgb_inner("absolute_error")),
+    "comps_hgb_l1_deep": lambda: CompsResidualModel(_hgb_inner("absolute_error", 800, 63, 0.03)),
+}
+
+FEATURE_SETS = {
+    "v1": {"features": FEATURES, "candidates": CANDIDATES, "comps": False},
+    "comps": {"features": FEATURES_V2 + [ANCHOR], "candidates": CANDIDATES_COMPS, "comps": True},
 }
 
 

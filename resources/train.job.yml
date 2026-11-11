@@ -8,7 +8,9 @@ resources:
         - name: train_cities
           default: '["boston", "jersey-city"]'
         - name: model_version
-          default: v1
+          default: v2
+        - name: feature_set
+          default: comps       # "v1" reproduces the week-1 model
         - name: model_name
           default: auto        # auto = lowest 5-fold CV MAE on the training split
         - name: overwrite

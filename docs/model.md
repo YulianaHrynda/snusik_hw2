@@ -100,3 +100,39 @@ Written before city C was loaded:
 * The model never saw a market with a different price level; tree models cannot predict outside
   the range of training prices.
 * The baseline and the outlier rule (\$750 per guest) were calibrated on A and B only.
+
+## Model `v2` — after city C
+
+The city C first run showed that `v1`'s *relative* judgement transfers but its *price level* and
+its location features do not ([city C report](city_c_report.md)). `v2` (feature set `comps`) is a
+model change, still trained on Boston + Jersey City only:
+
+* **removed** `city`, `neighbourhood`, `latitude`, `longitude` — city-specific (unseen levels,
+  homonyms such as "Chinatown", coordinates outside the training range);
+* **added market comps** computed inside each city from its own *training-split* listings with a
+  valid price, never using the listing itself or another listing of the same host:
+  `comp_price_seg` (median price of the 20 nearest listings with the same room type and stay type),
+  `comp_price_local` (median of the 50 nearest listings of any type), `comp_accommodates_seg`,
+  `comp_radius_km_seg` (density), `rel_accommodates`;
+* **target relative to the market**: the model fits `log(price) − log(comp_price_seg)` and predicts
+  `comp_price_seg × exp(…)`, so the price level comes from the local market and trees never have
+  to extrapolate a level they have not seen.
+
+| Candidate (5-fold CV on the A+B training split) | CV MAE |
+|---|---:|
+| **comps + gradient boosting, absolute loss** (chosen) | **73.41** |
+| comps + gradient boosting, absolute loss, deep | 73.51 |
+| comps + gradient boosting, squared loss | 73.64 |
+| comps + ridge | 82.29 |
+| baseline | 113.96 |
+
+| Test MAE | Baseline | `v1` | `v2` |
+|---|---:|---:|---:|
+| Boston | \$141.47 | \$80.72 | \$83.92 |
+| Jersey City | \$100.33 | \$63.35 | \$64.85 |
+| A + B | \$124.67 | **\$73.63** | **\$76.13** |
+| New York City (test split, never trained on) | \$164.16 | **\$143.16** | **\$114.70** |
+
+`v2` costs \$2.50 of MAE at home and saves \$28.46 in the new city. Most important `v2` features
+(permutation importance on the A+B test split): `comp_price_seg` (+\$118.5), `comp_log_price_seg`,
+`rel_accommodates`, `bedrooms`, `bathrooms`, `minimum_nights`.

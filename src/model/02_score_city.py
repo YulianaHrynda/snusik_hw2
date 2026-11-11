@@ -21,7 +21,7 @@ import pandas as pd
 
 from airbnb.tables import pandas_to_spark
 from airbnb.config import lakehouse_from, read_params
-from airbnb.modelling import drift_report, load_artifact, metrics_rows, prediction_frame, prepare
+from airbnb.modelling import MedianBaseline, add_comps, drift_report, load_artifact, metrics_rows, prediction_frame, prepare
 from airbnb.runlog import log_step
 
 params = read_params(dbutils, city="boston", model_version="v1", catalog="workspace", raw_root="", artifacts_root="")
@@ -30,6 +30,7 @@ city, version = params["city"], params["model_version"]
 
 artifact = load_artifact(lh.artifacts_root, version)
 model, baseline, features = artifact["model"], artifact["baseline"], artifact["features"]
+uses_comps = artifact.get("feature_set", "v1") == "comps"
 print(f"model {version}: {artifact['model_name']} trained on {artifact['train_cities']} at {artifact['created_at']}")
 
 # COMMAND ----------
@@ -38,11 +39,15 @@ pdf = spark.table(lh.table("gold", "listing_features")).where(f"city = '{city}'"
 if pdf.empty:
     raise ValueError(f"no gold features for city '{city}'; run airbnb_city_pipeline first")
 data = prepare(pdf)
+if uses_comps:  # market comps from this city's own training-split listings (not the listing, not its host)
+    data = add_comps(data)
 
 # Input drift against the model's training rows: unseen categories, numbers outside the training range
 train_list = ", ".join(f"'{c}'" for c in artifact["train_cities"])
 train_rows = prepare(spark.table(lh.table("gold", "listing_features"))
                      .where(f"city IN ({train_list}) AND split = 'train' AND is_trainable").toPandas())
+if uses_comps:
+    train_rows = add_comps(train_rows)
 drift = drift_report(train_rows, data, features)
 flagged = {k: v for k, v in drift.items() if max(v.values()) > 0.05}
 print("input drift (> 5% of rows unseen / out of range):", json.dumps(flagged, indent=1))
@@ -65,6 +70,14 @@ if role == "new":
     rows += metrics_rows(trainable, version, artifact["model_name"], "all", "trainable")
     rows += metrics_rows(scored[scored["actual_price"].notna()], version, artifact["model_name"], "all", "all_priced")
 rows = [r for r in rows if r["city"] != "ALL"]  # a single city: the ALL row duplicates it
+if role == "new":
+    # reference only: the same baseline rule fitted on the new city's own training split
+    own = data[data["is_trainable"].astype(bool) & data["split"].eq("train")]
+    local_base = pd.Series(MedianBaseline().fit(own, own["price"]).predict(data), index=preds.index)
+    for r in rows:
+        part = trainable[trainable["split"].eq(r["split"])] if r["split"] == "test" else (
+            trainable if r["scope"] == "trainable" else scored[scored["actual_price"].notna()])
+        r["baseline_local_mae"] = float((local_base.loc[part.index] - part["actual_price"]).abs().mean())
 metrics = pd.DataFrame(rows)
 metrics["created_at"] = pd.Timestamp.now(tz="UTC").tz_localize(None)
 display(metrics[["split", "scope", "city", "n", "model_mae", "baseline_mae", "mae_improvement_pct",

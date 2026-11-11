@@ -8,7 +8,7 @@ resources:
         - name: city
           default: new-york-city
         - name: model_version
-          default: v1
+          default: v2
         - name: catalog
           default: ${var.catalog}
       tasks:

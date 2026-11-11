@@ -24,15 +24,18 @@ from sklearn.model_selection import KFold
 
 from airbnb.tables import pandas_to_spark
 from airbnb.config import is_databricks, lakehouse_from, parse_city_list, read_params
-from airbnb.modelling import (CANDIDATES, FEATURES, RANDOM_STATE, MedianBaseline, error_metrics, metrics_rows,
+from airbnb.modelling import (FEATURE_SETS, RANDOM_STATE, MedianBaseline, add_comps, metrics_rows,
                               prediction_frame, prepare, save_artifact)
 
-params = read_params(dbutils, train_cities='["boston", "jersey-city"]', model_version="v1", model_name="auto",
-                     overwrite="false", catalog="workspace", raw_root="", artifacts_root="")
+# feature_set: "v1" = the original week-1 model, "comps" = v2 (after city C, see docs/city_c_report.md)
+params = read_params(dbutils, train_cities='["boston", "jersey-city"]', model_version="v2", feature_set="comps",
+                     model_name="auto", overwrite="false", catalog="workspace", raw_root="", artifacts_root="")
 lh = lakehouse_from(params)
 train_cities = parse_city_list(params["train_cities"])
 version = params["model_version"]
-print("training cities:", train_cities, "| model version:", version)
+fs = FEATURE_SETS[params["feature_set"]]
+FEATURES, CANDIDATES = fs["features"], fs["candidates"]
+print("training cities:", train_cities, "| model version:", version, "| feature set:", params["feature_set"])
 
 # COMMAND ----------
 
@@ -43,6 +46,8 @@ if missing_cities:
     raise ValueError(f"no gold features for {missing_cities}; run the city pipeline first")
 
 data = prepare(pdf)
+if fs["comps"]:
+    data = add_comps(data)  # comps from each city's own training split, never the listing itself or its host
 trainable = data[data["is_trainable"].astype(bool)]
 train = trainable[trainable["split"] == "train"].reset_index(drop=True)
 test = trainable[trainable["split"] == "test"].reset_index(drop=True)
@@ -133,6 +138,7 @@ display(err_by_room)
 
 path = save_artifact(lh.artifacts_root, version, {
     "model": model, "baseline": baseline, "model_name": model_name, "features": FEATURES,
+    "feature_set": params["feature_set"],
     "train_cities": train_cities, "cv": cv_table.reset_index().to_dict("records"),
     "test_metrics": [r for r in rows if r["split"] == "test"],
     "feature_importance": importance.to_dict("records"),

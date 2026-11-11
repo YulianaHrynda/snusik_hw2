@@ -103,7 +103,7 @@ def build_listing_features(silver: DataFrame) -> DataFrame:
     """Model-ready features, the label and the fixed train/test split."""
     amenity_cols = [F.expr(_amenity_expr(p)).alias(name) for name, p in AMENITY_FLAGS.items()]
     return silver.select(
-        "listing_id", "city", "snapshot_date",
+        "listing_id", "city", "snapshot_date", "host_id",  # host_id: comps exclude the host's own listings
         F.expr(SPLIT_EXPR).alias("split"),
         "price", "price_class",
         F.col("has_valid_price").alias("is_trainable"),
