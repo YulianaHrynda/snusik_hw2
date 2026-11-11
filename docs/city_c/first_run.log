@@ -1,0 +1,38 @@
+=== src/pipeline/00_setup.py {'city': 'new-york-city'}
+schemas: ['spark_catalog.airbnb_bronze', 'spark_catalog.airbnb_silver', 'spark_catalog.airbnb_gold']
+raw root: ./data/raw | artifacts root: ./.local_lakehouse/artifacts
+=== done in 1s
+=== src/pipeline/01_ingest_bronze.py {'city': 'new-york-city'}
+City(key='new-york-city', name='New York City', source_path='united-states/ny/new-york-city', snapshot_date='2026-09-14')
+downloaded ./data/raw/new-york-city/2026-09-14/listings.csv.gz
+spark_catalog.airbnb_bronze.listings_raw: 29918 rows, 90 source columns for new-york-city
+=== done in 18s -> {"city": "new-york-city", "bronze_rows": 29918}
+=== src/pipeline/02_build_silver.py {'city': 'new-york-city'}
+{'rows_in': 29918, 'parse_failures': {'id': 0, 'price': 0, 'accommodates': 0, 'bedrooms': 0, 'beds': 0, 'latitude': 0, 'longitude': 0, 'minimum_nights': 0, 'availability_365': 0, 'number_of_reviews': 0, 'review_scores_rating': 0, 'amenities': 0}, 'dropped_null_id': 0, 'rows_out': 29918, 'dropped_duplicates': 0}
++-----------+-----+
+|price_class|count|
++-----------+-----+
+|     normal|19180|
+|    missing|10512|
+|    extreme|  115|
+|implausible|  111|
++-----------+-----+
+=== done in 5s -> {"city": "new-york-city", "silver_rows": 29918}
+=== src/pipeline/03_build_gold.py {'city': 'new-york-city'}
+{'listings': 29918, 'city_metrics': 1, 'neighbourhood_metrics': 223, 'listing_features': 29918} {'test': 3814, 'train': 15481}
++-------------+-------------+-------------+--------+---------------+-----+--------------+------------+---------+---------+------------------------+-------------------------+-----------------------+-------------------------+------------------+------------------+--------------------+--------------------+------------------+----------------------+-----------------------+----------------------+--------
+|         city|snapshot_date|    city_name|listings|priced_listings|hosts|neighbourhoods|median_price|p25_price|p75_price|median_price_entire_home|median_price_private_room|median_price_short_stay|median_price_monthly_stay| entire_home_share|private_room_share|    hotel_room_share|   shared_room_share|monthly_stay_share|median_availability_30|median_availability_365|blocked_calendar_share| avg_rev
++-------------+-------------+-------------+--------+---------------+-----+--------------+------------+---------+---------+------------------------+-------------------------+-----------------------+-------------------------+------------------+------------------+--------------------+--------------------+------------------+----------------------+-----------------------+----------------------+--------
+|new-york-city|   2026-09-14|New York City|   29918|          19295|16148|           223|       181.2|   103.23|  332.515|                  216.99|                  114.555|                  373.0|                   146.09|0.5484992312320343|0.4296075940905141|0.015475633397954408|0.006417541279497292|0.8074403369209172|                   2.0|                  227.0|   0.23457450364329166|4.731260
++-------------+-------------+-------------+--------+---------------+-----+--------------+------------+---------+---------+------------------------+-------------------------+-----------------------+-------------------------+------------------+------------------+--------------------+--------------------+------------------+----------------------+-----------------------+----------------------+--------
+=== done in 6s -> {"city": "new-york-city", "gold": 29918}
+=== src/model/02_score_city.py {'city': 'new-york-city', 'model_version': 'v1'}
+model v1: hgb_log_l1_deep trained on ['boston', 'jersey-city'] at 2026-11-11T19:07:11+00:00
+new-york-city: 29918 listings scored as a new city
+  split       scope  ...  model_mape  model_bias
+0  test   trainable  ...    0.352310 -127.647391
+1   all   trainable  ...    0.345981 -121.968170
+2   all  all_priced  ...    0.349293 -146.056447
+[3 rows x 10 columns]
+spark_catalog.airbnb_gold.price_predictions: 29918 rows for new-york-city | spark_catalog.airbnb_gold.model_metrics: 3 rows
+=== done in 5s -> {"city": "new-york-city", "model_version": "v1", "metrics": {"test/trainable": {"n": 3814, "model_mae": 143.16055322496067, "baseline_mae": 164.15969847928682}, "all/trainable": {"n": 19295, "model_mae": 137.58446540554547, "baseline_mae": 159.00191655869395}, "all/all_priced": {"n": 19406, "model_mae": 161.58341904565597, "baseline_mae": 182.8778202617747}}}

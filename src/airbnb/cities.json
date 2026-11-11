@@ -11,6 +11,11 @@
       "name": "Jersey City",
       "source_path": "united-states/nj/jersey-city",
       "snapshot_date": "2026-09-21"
+    },
+    "new-york-city": {
+      "name": "New York City",
+      "source_path": "united-states/ny/new-york-city",
+      "snapshot_date": "2026-09-14"
     }
   }
 }
