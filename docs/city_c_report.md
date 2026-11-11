@@ -89,3 +89,97 @@ Jersey City" — which is roughly right for Queens and the Bronx and badly wrong
 prediction by the median actual/predicted ratio in NYC (1.29) would already cut the MAE from
 \$137.6 to \$122.0 — the model's *relative* judgement (bigger, better, more private → more
 expensive) transfers; its *level* does not.
+
+## 2. What we changed, and why
+
+Every change, in the order made. "Pipeline fix" = the pipeline should have handled it from the
+start; "model change" = the model did not transfer.
+
+| # | Kind | Change | Reason (what NYC showed) | Commit |
+|---|---|---|---|---|
+| 0 | configuration | add `new-york-city` to `cities.json` | the designed way to add a city — no code copied | first run |
+| 1 | **pipeline fix** | carry `neighbourhood_group_cleansed` (borough) through silver → gold (`neighbourhood_group`) | schema difference: the column is 100% empty in A and B, 100% full in C; silver dropped it silently, so NYC (223 neighbourhoods) had no usable area level for the dashboard and Genie | pipeline fixes |
+| 2 | **pipeline fix** | required vs optional source columns: missing required → fail with a clear message; missing optional → NULL + warning | #1 proved city files differ; a city without an optional column would have crashed silver with an analysis error | pipeline fixes |
+| 3 | **pipeline fix** | silver profiles the target and the market and warns outside the A/B ranges | the first run was "green" although 35% of the target was missing; now NYC logs 4 warnings: missing price 35.1%, implausible 0.4%, monthly stays 80.7%, stale records 29.8% | pipeline fixes |
+| 4 | **pipeline fix** | scoring logs an input-drift report (unseen category levels, values outside the training range) | nothing told us the model was scoring inputs it had never seen; for `v1` on NYC: `city` 100% unseen, `neighbourhood` 99.2% unseen, `latitude` 23% out of range | pipeline fixes |
+| 5 | **model change** | drop `city`, `neighbourhood`, `latitude`, `longitude` | features that mean nothing — or something else — in C: unseen levels, "Chinatown" = Boston's Chinatown, coordinates placed NYC "in Jersey City" | model v2 |
+| 6 | **model change** | market comps from the city's own training-split listings (20 nearest same-segment, 50 nearest overall; never the listing itself or its host's listings) and a target relative to them, `log(price / comp price)` | a price level the model never saw: Manhattan and short-stay prices are above anything learnt in A/B, and trees cannot extrapolate | model v2 |
+| 7 | model change (support) | `host_id` added to `gold.listing_features` | needed by #6 to exclude a host's own listings from its comps | model v2 |
+
+Checked and deliberately **not** changed:
+
+* **The implausible-price rule (≥ \$750 per guest).** It flags 111 NYC listings (0.4%, vs 0.1% in
+  A/B). We read them: \$12k–31k placeholder prices and \$800–1,300-a-night *single* private rooms
+  with no reviews and a 30-night minimum — errors, not luxury. The rule transfers; it now warns.
+* **The monthly threshold (28 nights).** NYC's 30-night minimum is correctly classified as monthly.
+* **The baseline.** By definition it stays the A+B training medians.
+
+The drift report also exposed a limit of simple range checks: NYC longitudes lie *between* Boston's
+and Jersey City's, so they are "in range" for a two-city training set although no training listing
+is anywhere near them.
+
+## 3. The numbers side by side
+
+MAE in USD per night. Training cities: their 20% test split. New York: the same hash-based 20% test
+split (3,814 listings) — it was never used for training by `v1` or `v2`.
+
+| | Boston + Jersey City (test) | New York City (test) |
+|---|---:|---:|
+| **Baseline** (median of A+B training prices by room type × guests) | \$124.67 | **\$164.16** |
+| **Model `v1`** — end of week 1, first run on C | **\$73.63** | **\$143.16** |
+| **Model `v2`** — after the changes (still trained on A+B only) | \$76.13 | **\$114.70** |
+| *reference:* baseline rule fitted on NYC's own training split | – | \$153.42 |
+| *reference:* `v2` recipe retrained with NYC's training split (`v2_abc`) | \$78.94 | \$87.58 |
+
+On *all* 19,295 NYC listings with a valid price: baseline \$159.00, `v1` \$137.58, `v2` \$110.73.
+
+Other views of the same predictions (test splits):
+
+| | MAE | Median abs. error | MAPE | Within ±25% | Mean error |
+|---|---:|---:|---:|---:|---:|
+| `v1` on A+B | \$73.63 | \$34.7 | 22.8% | 66.7% | −\$25.7 |
+| `v1` on NYC | \$143.16 | \$49.8 | 35.2% | 40.9% | −\$127.6 |
+| `v2` on NYC | \$114.70 | \$41.7 | 32.4% | 48.4% | −\$74.1 |
+| `v2_abc` on NYC (reference) | \$87.58 | \$32.5 | 25.4% | 60.8% | −\$40.0 |
+
+## 4. Explaining the gap
+
+The first-run gap is \$143.16 − \$73.63 = **\$69.5 per night**. \$2.5 of it is what `v2` gives up at
+home (A+B: \$73.63 → \$76.13); the remaining \$67.0 breaks down into three parts:
+
+1. **\$28.5 — features and price level that did not transfer** (`v1` → `v2`). Once the model stops
+   relying on Boston/Jersey City location features and anchors on what comparable NYC listings
+   charge, the systematic under-pricing halves (−\$128 → −\$74) and Manhattan's MAE drops from \$231 to
+   \$175. That is the part a better *transfer* design fixes without any NYC training.
+2. **\$27.1 — what can only be learnt from NYC itself** (`v2` → `v2_abc`). The same recipe trained
+   with NYC listings reaches \$87.58. The missing knowledge is specific to New York's market structure:
+   under Local Law 18 stays under 30 nights need a host registration, so the 19% of listings that
+   still take short stays are mostly registered units and hotel rooms, priced at a premium over the
+   monthly rentals around them, and Boston and Jersey City
+   have almost no examples (84 hotel rooms, no comparable regulation). Even `v2` predicts NYC
+   short stays at a median of \$301 against an actual \$380, and hotel rooms \$420 against \$577.
+3. **\$11.5 — NYC is a harder market** (`v2_abc` on NYC vs `v2` on A+B). Its prices are more spread
+   out: with its own training data the model is nearly as good in *relative* terms (MAPE 25.4% vs
+   22.8%), but the same relative error on a \$400–\$7,800 Manhattan listing is many more dollars. Even
+   `v2_abc` has an MAE of \$195 on Manhattan short stays, against \$34–55 on monthly rentals in the
+   outer boroughs.
+
+**What we would tell the client.** On day one we can price New York's outer boroughs and monthly
+rentals about as well as Boston and Jersey City (Queens, Bronx, Staten Island: \$43–63 MAE with `v2`).
+Manhattan short-stay and hotel prices are not reliable without NYC training data: retraining on the
+NYC snapshot (the `v2_abc` experiment) brings the city to \$87.58, and that is what we would ship
+after the first week with the client.
+
+## How to reproduce
+
+```bash
+python scripts/run_local.py train --train-cities boston,jersey-city --model-version v1 --feature-set v1
+python scripts/run_local.py onboard --city new-york-city --model-version v1   # first run
+python scripts/run_local.py train --train-cities boston,jersey-city --model-version v2 --feature-set comps
+python scripts/run_local.py onboard --city new-york-city --model-version v2
+python scripts/run_local.py train --skip-etl --train-cities boston,jersey-city,new-york-city \
+    --model-version v2_abc --feature-set comps --model-name comps_hgb_l1                 # reference
+```
+
+On Databricks the same steps are the jobs `airbnb_train_price_model` (parameters `train_cities`,
+`model_version`, `feature_set`) and `airbnb_onboard_city` (`city`, `model_version`).
