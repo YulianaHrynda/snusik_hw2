@@ -23,6 +23,7 @@ COMMENTS = {
         "city": "City key: 'boston' (city A), 'jersey-city' (city B), 'new-york-city' (city C, new client)",
         "city_name": "City display name",
         "neighbourhood": "Neighbourhood (Jersey City: council ward)",
+        "neighbourhood_group": "Borough for New York (Manhattan, Brooklyn, Queens, Bronx, Staten Island); NULL for Boston and Jersey City",
         "room_type": "'Entire home/apt', 'Private room', 'Hotel room' or 'Shared room'",
         "accommodates": "Maximum number of guests",
         "price": "Advertised price per night in USD. Use only rows with has_valid_price = true for statistics",
@@ -48,8 +49,8 @@ COMMENTS = {
     }),
     "price_predictions": ("Price model predictions for every listing, one row per model_version and listing. "
                           "Join to listings on (city, listing_id).", {
-        "model_version": "'v1' = week-1 model trained on Boston + Jersey City; 'v2' = model after the city C changes",
-        "split": "'train' or 'test' (fixed hash split). Evaluate training cities on split = 'test' only",
+        "model_version": "'v1' = week-1 model; 'v2' = current model after the city C changes (both trained on Boston + Jersey City); 'v2_abc' = reference retrained with New York data",
+        "split": "'train' or 'test' (fixed hash split). Evaluate every city on split = 'test' only",
         "city_role": "'training' if the model was trained on this city, 'new' otherwise (all rows are out-of-sample)",
         "is_trainable": "True when actual_price is valid; only these rows can be evaluated",
         "actual_price": "Advertised price per night, USD",
@@ -60,7 +61,7 @@ COMMENTS = {
         "pct_error": "error / actual_price",
     }),
     "model_metrics": ("Model and baseline error per model_version, city ('ALL' = A and B together), split and scope.", {
-        "split": "'test' = held-out 20% of training cities; 'all' = every listing of a new city; 'train'; 'cv'",
+        "split": "'test' = held-out 20% hash split (use this); 'all' = every listing of a new city; 'train'; 'cv'",
         "scope": "'trainable' = valid prices (main metric); 'all_priced' also includes implausible prices",
         "model_mae": "Mean absolute error of the model, USD",
         "baseline_mae": "Mean absolute error of the baseline, USD",

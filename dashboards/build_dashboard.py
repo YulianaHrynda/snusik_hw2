@@ -18,18 +18,20 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "airbnb_us_northe
 
 # ----------------------------------------------------------------------------- page titles (findings)
 TITLES = {
-    "overview": "Boston is the bigger and pricier market: 4,368 listings at a $253 median night vs 2,330 at $215 in Jersey City",
+    "overview": "Boston has the priciest typical night ($253 median); New York is a monthly-rental market (81% of listings need 30+ nights)",
     "compare": "An entire home costs the same in both cities (~$300); Jersey City is cheaper only for private rooms (−32%) and small units",
-    "model": "The model cuts the baseline's error by 41% (MAE $74 vs $125 on test listings), but still under-prices large luxury homes",
+    "model": "41% better than the baseline at home, but the first New York run under-priced by $128 a night; v2 cuts NYC error from $143 to $115",
 }
 SUBTITLES = {
-    "overview": "Pick a city. Location drives price inside a city (Longwood, North End and Downtown are ~$360+, East Boston ~$220), "
-                "and ~3 in 4 listings belong to hosts with more than one listing. Prices are USD per night; "
-                "medians use listings with a valid price.",
+    "overview": "Pick a city. Location drives price inside a city (Boston: Longwood, North End and Downtown ~$360+, East Boston ~$220). "
+                "Multi-listing hosts run 73–80% of listings in Boston and Jersey City, 57% in New York. Prices are USD per night; "
+                "medians use listings with a valid price. New York (city C) was added after the model was built.",
     "compare": "Monthly rentals (28+ night minimum) are ~42% of listings in both cities and cost about half as much per night. "
                "Boston's premium sits in 1–3 guest units ($211 vs $108 for 2 guests) and disappears for 6+ guests.",
-    "model": "Baseline = median training price for the same room type and number of guests. Errors are largest for entire homes "
-             "($86–90 MAE) and the model under-prices on average (−$26), most in South Boston Waterfront and Back Bay (−$80 per night) and Jersey City Ward D (−$68) — driven by a few luxury homes: the median error there is far smaller.",
+    "model": "Test listings only (New York: the same 20% hash split, never trained on). Baseline = median A+B training price for the same "
+             "room type and guests. v1 = week-1 model; v2 = after the city C changes (market comps, no city-specific features), still "
+             "trained on Boston + Jersey City; v2_abc = reference retrained with NYC data. Negative error = under-priced: the biggest "
+             "misses are Manhattan short stays and hotels, and a few luxury homes in Back Bay and Ward D.",
 }
 
 # ----------------------------------------------------------------------------- datasets
@@ -52,12 +54,18 @@ SELECT city_name, room_type, count(*) AS listings,
 FROM {GOLD}.listings
 GROUP BY city_name, room_type"""),
     "neighbourhoods": ("Neighbourhoods", f"""
-SELECT city_name, neighbourhood, listings, priced_listings, round(median_price, 0) AS median_price,
+SELECT city_name, neighbourhood_group, neighbourhood, listings, priced_listings, round(median_price, 0) AS median_price,
        round(median_price_entire_home, 0) AS median_price_entire_home,
        round(100 * entire_home_share, 1) AS entire_home_pct, round(avg_review_score, 2) AS avg_review_score,
-       median_availability_365, price_rank_in_city
+       median_availability_365,
+       row_number() OVER (PARTITION BY city ORDER BY median_price DESC) AS price_rank
 FROM {GOLD}.neighbourhood_metrics
 WHERE priced_listings >= 10"""),
+    "top_neighbourhoods": ("Top 20 neighbourhoods by price", f"""
+SELECT city_name, neighbourhood, round(median_price, 0) AS median_price, priced_listings
+FROM (SELECT *, row_number() OVER (PARTITION BY city ORDER BY median_price DESC) AS rk
+      FROM {GOLD}.neighbourhood_metrics WHERE priced_listings >= 10)
+WHERE rk <= 20"""),
     "compare_table": ("A vs B side by side", f"""
 WITH m AS (SELECT * FROM {GOLD}.city_metrics WHERE city IN {TRAIN_CITIES}),
 b AS (SELECT * FROM m WHERE city = 'boston'), j AS (SELECT * FROM m WHERE city = 'jersey-city'),
@@ -91,26 +99,40 @@ FROM {GOLD}.listings
 WHERE has_valid_price AND city IN {TRAIN_CITIES} AND room_type IN ('Entire home/apt', 'Private room')
 GROUP BY ALL"""),
     "model_metrics": ("Model vs baseline", f"""
-SELECT model_version, CASE city WHEN 'ALL' THEN 'A + B together' WHEN 'boston' THEN 'Boston'
+SELECT model_version,
+       CASE model_version WHEN 'v1' THEN 'v1 · week 1' WHEN 'v2' THEN 'v2 · after city C'
+            WHEN 'v2_abc' THEN 'v2_abc · reference, trained with NYC' ELSE model_version END AS model_label,
+       CASE city WHEN 'ALL' THEN 'A + B together' WHEN 'boston' THEN 'Boston'
          WHEN 'jersey-city' THEN 'Jersey City' WHEN 'new-york-city' THEN 'New York City' ELSE city END AS city_name,
        split, n, round(model_mae, 1) AS model_mae, round(baseline_mae, 1) AS baseline_mae,
        round(100 * mae_improvement_pct, 1) AS improvement_pct, round(model_median_ae, 1) AS model_median_ae,
        round(100 * model_mape, 1) AS model_mape_pct, round(model_bias, 1) AS model_bias
 FROM {GOLD}.model_metrics
-WHERE scope = 'trainable' AND split IN ('test', 'all') AND model_name <> 'baseline' AND baseline_mae IS NOT NULL"""),
+WHERE scope = 'trainable' AND split = 'test' AND model_name <> 'baseline'"""),
+    "mae_by_version": ("MAE by version", f"""
+SELECT CASE city WHEN 'ALL' THEN 'Boston + Jersey City' ELSE 'New York City' END AS evaluated_on,
+       'baseline' AS series, round(baseline_mae, 1) AS mae
+FROM {GOLD}.model_metrics
+WHERE model_version = 'v1' AND split = 'test' AND scope = 'trainable' AND city IN ('ALL', 'new-york-city')
+UNION ALL
+SELECT CASE city WHEN 'ALL' THEN 'Boston + Jersey City' ELSE 'New York City' END, model_version, round(model_mae, 1)
+FROM {GOLD}.model_metrics
+WHERE model_version IN ('v1', 'v2') AND split = 'test' AND scope = 'trainable' AND city IN ('ALL', 'new-york-city')"""),
     "predictions": ("Predictions (evaluation listings)", f"""
-SELECT p.model_version, l.city_name, p.listing_id, p.room_type, p.neighbourhood, p.accommodates,
+SELECT p.model_version, l.city_name, p.listing_id, p.room_type, p.neighbourhood,
+       coalesce(l.neighbourhood_group, l.neighbourhood) AS area, p.accommodates,
        p.actual_price, p.predicted_price, p.baseline_price, p.error, p.abs_error,
        round(100 * p.pct_error, 1) AS pct_error, p.city_role, l.listing_url
 FROM {GOLD}.price_predictions p JOIN {GOLD}.listings l USING (city, listing_id)
-WHERE p.is_trainable AND (p.split = 'test' OR p.city_role = 'new')"""),
+WHERE p.is_trainable AND p.split = 'test'"""),
     "error_by_room": ("Error by room type", """
 SELECT model_version, city_name, room_type, count(*) AS listings,
        round(avg(abs_error), 1) AS model_mae, round(avg(abs(baseline_price - actual_price)), 1) AS baseline_mae,
        round(avg(error), 1) AS mean_error
 FROM ({predictions}) GROUP BY ALL"""),
     "error_by_neighbourhood": ("Error by neighbourhood", """
-SELECT model_version, city_name, neighbourhood, count(*) AS listings, round(avg(error), 1) AS mean_error,
+SELECT model_version, city_name, area, concat(city_name, ' · ', area) AS city_area, count(*) AS listings,
+       round(avg(error), 1) AS mean_error, round(percentile(error, 0.5), 1) AS median_error,
        round(avg(abs_error), 1) AS model_mae
 FROM ({predictions}) GROUP BY ALL HAVING count(*) >= 10"""),
 }
@@ -201,7 +223,8 @@ def header(key):
 # ----------------------------------------------------------------------------- pages
 overview = page("overview", [
     header("overview"),
-    single_filter("city_filter", ["city_metrics", "room_mix", "neighbourhoods"], "city_name", "City", (0, 2, 2, 2), default="Boston"),
+    single_filter("city_filter", ["city_metrics", "room_mix", "neighbourhoods", "top_neighbourhoods"], "city_name", "City",
+                  (0, 2, 2, 2), default="Boston"),
     counter("c_listings", "city_metrics", "listings", "Listings", (2, 2, 1, 2)),
     counter("c_median", "city_metrics", "median_price", "Median price per night, $", (3, 2, 1, 2)),
     counter("c_avail", "city_metrics", "median_availability_365", "Median days available (next 365)", (4, 2, 1, 2)),
@@ -212,14 +235,15 @@ overview = page("overview", [
     counter("c_blocked", "city_metrics", "blocked_calendar_pct", "Fully blocked calendars, %", (5, 4, 1, 2)),
     chart("room_mix_bar", "bar", "room_mix", "room_type", "listings", "Room-type mix", (0, 4, 2, 6),
           labels={"room_type": "Room type", "listings": "Listings"}),
-    chart("nbhd_price_bar", "bar", "neighbourhoods", "median_price", "neighbourhood",
-          "Neighbourhoods by median price (≥10 priced listings)", (2, 6, 4, 8), x_type="quantitative",
+    chart("nbhd_price_bar", "bar", "top_neighbourhoods", "median_price", "neighbourhood",
+          "Top 20 neighbourhoods by median price (≥10 priced listings)", (2, 6, 4, 8), x_type="quantitative",
           y_type="categorical", sort=("y", "x-reversed"),
           labels={"median_price": "Median price, $", "neighbourhood": "Neighbourhood"}),
     chart("room_price_bar", "bar", "room_mix", "room_type", "median_price", "Median price by room type, $", (0, 10, 2, 4),
           labels={"room_type": "Room type", "median_price": "Median price, $"}),
     table("nbhd_table", "neighbourhoods",
-          [("neighbourhood", "Neighbourhood"), ("listings", "Listings"), ("median_price", "Median price, $"),
+          [("neighbourhood_group", "Borough / area"), ("neighbourhood", "Neighbourhood"), ("listings", "Listings"),
+           ("median_price", "Median price, $"),
            ("median_price_entire_home", "Median entire home, $"), ("entire_home_pct", "Entire homes, %"),
            ("avg_review_score", "Avg review score"), ("median_availability_365", "Median days available")],
           "Neighbourhood details", (0, 14, 6, 7)),
@@ -242,28 +266,31 @@ compare = page("compare", [
 
 model = page("model", [
     header("model"),
-    single_filter("version_filter", ["model_metrics", "predictions", "error_by_room", "error_by_neighbourhood"],
-                  "model_version", "Model version", (0, 2, 2, 2), default="v1"),
+    chart("version_bar", "bar", "mae_by_version", "evaluated_on", "mae",
+          "Test MAE, $: baseline vs v1 vs v2 — at home and in the new city", (0, 2, 2, 5), color="series", layout="group",
+          labels={"evaluated_on": "Evaluated on", "mae": "MAE, $", "series": "Model"}),
     table("metrics_table", "model_metrics",
-          [("city_name", "City"), ("split", "Evaluated on"), ("n", "Listings"), ("baseline_mae", "Baseline MAE, $"),
+          [("model_label", "Model"), ("city_name", "City"), ("n", "Test listings"), ("baseline_mae", "Baseline MAE, $"),
            ("model_mae", "Model MAE, $"), ("improvement_pct", "Improvement, %"), ("model_median_ae", "Median abs. error, $"),
            ("model_mape_pct", "MAPE, %"), ("model_bias", "Mean error (bias), $")],
-          "Test-set error: model vs baseline (median price for the same room type and guests)", (2, 2, 4, 5)),
+          "Test-set error by model version and city", (2, 2, 4, 5)),
+    single_filter("version_filter", ["predictions", "error_by_room", "error_by_neighbourhood"],
+                  "model_version", "Model version (charts below)", (0, 7, 2, 2), default="v2"),
     chart("pred_scatter", "scatter", "predictions", "actual_price", "predicted_price",
-          "Predicted vs actual price (test listings)", (0, 7, 3, 7), color="city_name", x_type="quantitative",
+          "Predicted vs actual price (test listings)", (0, 9, 3, 7), color="city_name", x_type="quantitative",
           labels={"actual_price": "Actual price, $", "predicted_price": "Predicted price, $", "city_name": "City"}),
     chart("room_err_bar", "bar", "error_by_room", "room_type", "model_mae", "Model MAE by room type, $",
-          (3, 7, 3, 7), color="city_name", layout="group",
+          (3, 9, 3, 7), color="city_name", layout="group",
           labels={"room_type": "Room type", "model_mae": "MAE, $", "city_name": "City"}),
-    chart("nbhd_err_bar", "bar", "error_by_neighbourhood", "mean_error", "neighbourhood",
-          "Mean error by neighbourhood (negative = model under-prices)", (0, 14, 6, 8), x_type="quantitative",
-          y_type="categorical", sort=("y", "x"), color="city_name",
-          labels={"mean_error": "Mean error, $", "neighbourhood": "Neighbourhood", "city_name": "City"}),
+    chart("nbhd_err_bar", "bar", "error_by_neighbourhood", "mean_error", "city_area",
+          "Mean error by area — neighbourhood (Boston, Jersey City) or borough (New York); negative = under-priced",
+          (0, 16, 6, 8), x_type="quantitative", y_type="categorical", sort=("y", "x"), color="city_name",
+          labels={"mean_error": "Mean error, $", "city_area": "Area", "city_name": "City"}),
     table("worst_table", "predictions",
           [("city_name", "City"), ("listing_id", "Listing"), ("room_type", "Room type"), ("neighbourhood", "Neighbourhood"),
            ("accommodates", "Guests"), ("actual_price", "Actual, $"), ("predicted_price", "Predicted, $"),
            ("error", "Error, $"), ("pct_error", "Error, %"), ("listing_url", "URL")],
-          "Listings the model mis-prices most (sort by Error: lowest = under-priced, highest = over-priced)", (0, 22, 6, 8)),
+          "Listings the model mis-prices most (sort by Error: lowest = under-priced, highest = over-priced)", (0, 24, 6, 8)),
 ])
 
 

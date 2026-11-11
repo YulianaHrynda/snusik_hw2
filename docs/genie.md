@@ -39,22 +39,24 @@ Only **gold** tables, all in `workspace.airbnb_gold`:
 3. **Sign conventions written down twice** — in the instructions and as a column comment:
    `error = predicted − actual`, negative = under-priced. "Under-price the most" then becomes
    `ORDER BY avg(error) ASC`, not `DESC`.
-4. **Evaluation rows are spelled out**: training cities on `split = 'test'` only, the new city on
-   all rows, `is_trainable = true`. Otherwise Genie would report in-sample errors.
+4. **Evaluation rows are spelled out**: every city on `split = 'test'` (New York's test split was
+   never trained on), `is_trainable = true`. Otherwise Genie would report in-sample errors.
 5. **Unity Catalog comments** on every gold table and on the columns that carry meaning (units,
    0–1 shares vs percentages, NULL semantics) — [`genie/01_document_gold_tables.py`](../genie/01_document_gold_tables.py).
    They survive the per-city overwrites of the pipeline.
 6. **Join specs with relationship types** (`price_predictions → listings` many-to-one on
    `(city, listing_id)`) so joins never fan out.
-7. **Example SQL for the three required questions** plus three more (model vs baseline, private
-   rooms across cities, most over-priced listings). Genie reuses them as templates.
-8. **Pre-aggregated tables come with a warning**: "never sum their medians".
-9. **Stable ids** (hash of the content) so re-deploying updates the same space instead of
+7. **Example SQL for the three required questions** plus four more (model vs baseline, private
+   rooms across cities, most over-priced listings, New York by borough). Genie reuses them as templates.
+8. **Model versions are named in plain words** — "first run" = `v1`, current = `v2`, and `v2_abc` only
+   when asked about training on New York — so Genie does not average across versions.
+9. **Pre-aggregated tables come with a warning**: "never sum their medians".
+10. **Stable ids** (hash of the content) so re-deploying updates the same space instead of
    duplicating instructions.
 
 ## Example questions and the answers Genie must give
 
-Answers computed from the gold tables with exactly the example SQL in `space.yml` (model `v1`):
+Answers computed from the gold tables with exactly the example SQL in `space.yml`:
 
 **"What is the median price of entire homes in City A?"** — **\$297.16** per night (Boston,
 2,391 entire homes with a valid price).
@@ -70,22 +72,34 @@ Answers computed from the gold tables with exactly the example SQL in `space.yml
 | Ward B (councilmember Mira Prinz-Arey) | 321 |
 | Ward A (councilmember Denise Ridley) | 160 |
 
-**"Where does the model under-price listings the most?"** — by mean error on test listings,
-neighbourhoods with ≥ 10 test listings:
+**"Where does the model under-price listings the most?"** — current model `v2`, test listings, by
+neighbourhood (Boston, Jersey City) or borough (New York), areas with ≥ 10 test listings:
 
-| City | Neighbourhood | Test listings | Mean error | Median error |
+| City | Area | Test listings | Mean error | Median error |
 |---|---|---:|---:|---:|
-| Boston | South Boston Waterfront | 17 | −\$83.5 | −\$40.4 |
-| Boston | Back Bay | 66 | −\$80.0 | −\$29.0 |
-| Jersey City | Ward D | 91 | −\$68.3 | −\$2.0 |
-| Boston | Fenway | 41 | −\$65.6 | −\$42.9 |
-| Boston | North End | 21 | −\$55.8 | −\$12.1 |
+| New York City | Manhattan | 1,681 | −\$124.9 | −\$26.8 |
+| Boston | Back Bay | 66 | −\$87.2 | −\$23.5 |
+| Boston | Fenway | 41 | −\$67.1 | −\$35.1 |
+| Boston | South Boston Waterfront | 17 | −\$65.1 | −\$31.5 |
+| Jersey City | Ward D | 91 | −\$60.9 | −\$3.3 |
 
 The gap between mean and median error shows the under-pricing is concentrated in a few expensive
-listings (Ward D: median error −\$2, mean −\$68).
+listings (Ward D: median −\$3, mean −\$61). Asked about the *first run* (`v1`), Manhattan is at
+−\$224.2 on average.
 
-**"How much better is the model than the baseline?"** — test MAE \$73.6 vs \$124.7 (−40.9%);
-Boston \$80.7 vs \$141.5, Jersey City \$63.3 vs \$100.3.
+**"How much better is the model than the baseline?"** — test MAE, baseline → model:
+
+| | `v1` | `v2` |
+|---|---:|---:|
+| Boston + Jersey City | \$124.7 → \$73.6 (−40.9%) | \$124.7 → \$76.1 (−38.9%) |
+| New York City | \$164.2 → \$143.2 (−12.8%) | \$164.2 → \$114.7 (−30.1%) |
+
+**"How well does the model price New York, by borough?"** — test MAE `v1` → `v2`: Manhattan
+\$231.1 → \$174.9, Brooklyn \$82.0 → \$72.4, Queens \$66.0 → \$62.6, Bronx \$52.0 → \$53.5,
+Staten Island \$40.9 → \$42.7.
+
+**"Compare the median price of private rooms across cities"** — Boston \$118.70, New York
+\$114.56, Jersey City \$80.32.
 
 ## Status
 

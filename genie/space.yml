@@ -25,18 +25,24 @@ instructions: |
   - "Monthly" or "long-stay" listings have monthly_stay = true (minimum stay of 28+ nights); their
     nightly price is much lower than short-stay listings. Mention this when comparing prices.
   - Neighbourhoods are in the `neighbourhood` column; in Jersey City they are council wards
-    (e.g. 'Ward E (councilmember James Solomon)').
+    (e.g. 'Ward E (councilmember James Solomon)'). New York also has boroughs in `neighbourhood_group`
+    ('Manhattan', 'Brooklyn', 'Queens', 'Bronx', 'Staten Island'); it is NULL for Boston and Jersey City.
+    "Borough" or "area of New York" means neighbourhood_group.
   - For counts of listings use workspace.airbnb_gold.listings (one row per listing). city_metrics and
     neighbourhood_metrics are pre-aggregated: never sum their medians.
   - Model questions use workspace.airbnb_gold.price_predictions joined to listings on (city, listing_id).
     error = predicted_price - actual_price. Negative error = the model UNDER-prices the listing;
     positive = OVER-prices. Only evaluate rows with is_trainable = true.
-    For training cities (city_role = 'training') evaluate on split = 'test' only; for the new city
-    (city_role = 'new') use all its rows.
-  - Use the most recent model_version unless the user names one: 'v2' for New York City if it exists, otherwise 'v1'.
-    'v1' is the original week-1 model; 'v2' is the model after the city C changes.
-  - MAE / accuracy questions: use model_metrics with scope = 'trainable'. split = 'test' for Boston,
-    Jersey City and city = 'ALL' (A and B together); split = 'all' for New York City.
+    Evaluate on split = 'test' only.
+  - Model versions: 'v1' = original week-1 model (trained on Boston + Jersey City); 'v2' = the current
+    model after the city C changes (also trained on Boston + Jersey City only). Use model_version = 'v2'
+    unless the user names a version or asks about the "first run" / "original model" (then 'v1').
+    'v2_abc' is a reference experiment retrained with New York data: use it ONLY when the user asks
+    what happens if the model is trained on New York.
+  - For every city, evaluate on split = 'test' (for New York the test split was never used for training
+    by v1 or v2). Never report errors on split = 'train'.
+  - MAE / accuracy questions: use model_metrics with scope = 'trainable' and split = 'test'.
+    city = 'ALL' means Boston and Jersey City together (for v2_abc it also includes New York).
     baseline_mae is the median price for the same room type and number of guests.
   - Never show host names together with prices of individual listings unless asked; never use SELECT *.
 
@@ -55,13 +61,13 @@ example_sqls:
       ORDER BY listings DESC
   - question: "Where does the model under-price listings the most?"
     sql: |
-      SELECT l.city_name, p.neighbourhood, count(*) AS listings,
+      SELECT l.city_name, coalesce(l.neighbourhood_group, l.neighbourhood) AS area, count(*) AS listings,
              round(avg(p.error), 1) AS mean_error_usd,
              round(percentile(p.error, 0.5), 1) AS median_error_usd
       FROM workspace.airbnb_gold.price_predictions p
       JOIN workspace.airbnb_gold.listings l ON p.city = l.city AND p.listing_id = l.listing_id
-      WHERE p.is_trainable AND p.model_version = 'v1' AND p.city_role = 'training' AND p.split = 'test'
-      GROUP BY l.city_name, p.neighbourhood
+      WHERE p.is_trainable AND p.model_version = 'v2' AND p.split = 'test'
+      GROUP BY l.city_name, coalesce(l.neighbourhood_group, l.neighbourhood)
       HAVING count(*) >= 10
       ORDER BY mean_error_usd ASC
       LIMIT 10
@@ -70,7 +76,7 @@ example_sqls:
       SELECT city, model_version, split, n, round(baseline_mae, 1) AS baseline_mae, round(model_mae, 1) AS model_mae,
              round(100 * mae_improvement_pct, 1) AS improvement_pct
       FROM workspace.airbnb_gold.model_metrics
-      WHERE scope = 'trainable' AND split IN ('test', 'all') AND baseline_mae IS NOT NULL
+      WHERE scope = 'trainable' AND split = 'test' AND model_version IN ('v1', 'v2')
       ORDER BY model_version, city
   - question: "Compare the median price of private rooms across cities"
     sql: |
@@ -85,9 +91,19 @@ example_sqls:
              p.actual_price, p.predicted_price, p.error, l.listing_url
       FROM workspace.airbnb_gold.price_predictions p
       JOIN workspace.airbnb_gold.listings l ON p.city = l.city AND p.listing_id = l.listing_id
-      WHERE p.is_trainable AND p.model_version = 'v1' AND (p.split = 'test' OR p.city_role = 'new')
+      WHERE p.is_trainable AND p.model_version = 'v2' AND p.split = 'test'
       ORDER BY p.error DESC
       LIMIT 10
+
+  - question: "How well does the model price New York, by borough?"
+    sql: |
+      SELECT l.neighbourhood_group AS borough, p.model_version, count(*) AS test_listings,
+             round(avg(p.abs_error), 1) AS mae_usd, round(avg(p.error), 1) AS mean_error_usd
+      FROM workspace.airbnb_gold.price_predictions p
+      JOIN workspace.airbnb_gold.listings l ON p.city = l.city AND p.listing_id = l.listing_id
+      WHERE p.city = 'new-york-city' AND p.is_trainable AND p.split = 'test' AND p.model_version IN ('v1', 'v2')
+      GROUP BY l.neighbourhood_group, p.model_version
+      ORDER BY borough, p.model_version
 
 joins:
   - left: workspace.airbnb_gold.price_predictions
@@ -104,3 +120,4 @@ sample_questions:
   - "Which neighbourhoods in City B have the most listings?"
   - "Where does the model under-price listings the most?"
   - "How much better is the model than the baseline?"
+  - "How well does the model price New York, by borough?"

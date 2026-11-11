@@ -31,12 +31,23 @@
       "name": "neighbourhoods",
       "displayName": "Neighbourhoods",
       "queryLines": [
-        "SELECT city_name, neighbourhood, listings, priced_listings, round(median_price, 0) AS median_price,\n",
+        "SELECT city_name, neighbourhood_group, neighbourhood, listings, priced_listings, round(median_price, 0) AS median_price,\n",
         "       round(median_price_entire_home, 0) AS median_price_entire_home,\n",
         "       round(100 * entire_home_share, 1) AS entire_home_pct, round(avg_review_score, 2) AS avg_review_score,\n",
-        "       median_availability_365, price_rank_in_city\n",
+        "       median_availability_365,\n",
+        "       row_number() OVER (PARTITION BY city ORDER BY median_price DESC) AS price_rank\n",
         "FROM workspace.airbnb_gold.neighbourhood_metrics\n",
         "WHERE priced_listings >= 10\n"
+      ]
+    },
+    {
+      "name": "top_neighbourhoods",
+      "displayName": "Top 20 neighbourhoods by price",
+      "queryLines": [
+        "SELECT city_name, neighbourhood, round(median_price, 0) AS median_price, priced_listings\n",
+        "FROM (SELECT *, row_number() OVER (PARTITION BY city ORDER BY median_price DESC) AS rk\n",
+        "      FROM workspace.airbnb_gold.neighbourhood_metrics WHERE priced_listings >= 10)\n",
+        "WHERE rk <= 20\n"
       ]
     },
     {
@@ -90,24 +101,42 @@
       "name": "model_metrics",
       "displayName": "Model vs baseline",
       "queryLines": [
-        "SELECT model_version, CASE city WHEN 'ALL' THEN 'A + B together' WHEN 'boston' THEN 'Boston'\n",
+        "SELECT model_version,\n",
+        "       CASE model_version WHEN 'v1' THEN 'v1 · week 1' WHEN 'v2' THEN 'v2 · after city C'\n",
+        "            WHEN 'v2_abc' THEN 'v2_abc · reference, trained with NYC' ELSE model_version END AS model_label,\n",
+        "       CASE city WHEN 'ALL' THEN 'A + B together' WHEN 'boston' THEN 'Boston'\n",
         "         WHEN 'jersey-city' THEN 'Jersey City' WHEN 'new-york-city' THEN 'New York City' ELSE city END AS city_name,\n",
         "       split, n, round(model_mae, 1) AS model_mae, round(baseline_mae, 1) AS baseline_mae,\n",
         "       round(100 * mae_improvement_pct, 1) AS improvement_pct, round(model_median_ae, 1) AS model_median_ae,\n",
         "       round(100 * model_mape, 1) AS model_mape_pct, round(model_bias, 1) AS model_bias\n",
         "FROM workspace.airbnb_gold.model_metrics\n",
-        "WHERE scope = 'trainable' AND split IN ('test', 'all') AND model_name <> 'baseline' AND baseline_mae IS NOT NULL\n"
+        "WHERE scope = 'trainable' AND split = 'test' AND model_name <> 'baseline'\n"
+      ]
+    },
+    {
+      "name": "mae_by_version",
+      "displayName": "MAE by version",
+      "queryLines": [
+        "SELECT CASE city WHEN 'ALL' THEN 'Boston + Jersey City' ELSE 'New York City' END AS evaluated_on,\n",
+        "       'baseline' AS series, round(baseline_mae, 1) AS mae\n",
+        "FROM workspace.airbnb_gold.model_metrics\n",
+        "WHERE model_version = 'v1' AND split = 'test' AND scope = 'trainable' AND city IN ('ALL', 'new-york-city')\n",
+        "UNION ALL\n",
+        "SELECT CASE city WHEN 'ALL' THEN 'Boston + Jersey City' ELSE 'New York City' END, model_version, round(model_mae, 1)\n",
+        "FROM workspace.airbnb_gold.model_metrics\n",
+        "WHERE model_version IN ('v1', 'v2') AND split = 'test' AND scope = 'trainable' AND city IN ('ALL', 'new-york-city')\n"
       ]
     },
     {
       "name": "predictions",
       "displayName": "Predictions (evaluation listings)",
       "queryLines": [
-        "SELECT p.model_version, l.city_name, p.listing_id, p.room_type, p.neighbourhood, p.accommodates,\n",
+        "SELECT p.model_version, l.city_name, p.listing_id, p.room_type, p.neighbourhood,\n",
+        "       coalesce(l.neighbourhood_group, l.neighbourhood) AS area, p.accommodates,\n",
         "       p.actual_price, p.predicted_price, p.baseline_price, p.error, p.abs_error,\n",
         "       round(100 * p.pct_error, 1) AS pct_error, p.city_role, l.listing_url\n",
         "FROM workspace.airbnb_gold.price_predictions p JOIN workspace.airbnb_gold.listings l USING (city, listing_id)\n",
-        "WHERE p.is_trainable AND (p.split = 'test' OR p.city_role = 'new')\n"
+        "WHERE p.is_trainable AND p.split = 'test'\n"
       ]
     },
     {
@@ -118,25 +147,28 @@
         "       round(avg(abs_error), 1) AS model_mae, round(avg(abs(baseline_price - actual_price)), 1) AS baseline_mae,\n",
         "       round(avg(error), 1) AS mean_error\n",
         "FROM (\n",
-        "SELECT p.model_version, l.city_name, p.listing_id, p.room_type, p.neighbourhood, p.accommodates,\n",
+        "SELECT p.model_version, l.city_name, p.listing_id, p.room_type, p.neighbourhood,\n",
+        "       coalesce(l.neighbourhood_group, l.neighbourhood) AS area, p.accommodates,\n",
         "       p.actual_price, p.predicted_price, p.baseline_price, p.error, p.abs_error,\n",
         "       round(100 * p.pct_error, 1) AS pct_error, p.city_role, l.listing_url\n",
         "FROM workspace.airbnb_gold.price_predictions p JOIN workspace.airbnb_gold.listings l USING (city, listing_id)\n",
-        "WHERE p.is_trainable AND (p.split = 'test' OR p.city_role = 'new')) GROUP BY ALL\n"
+        "WHERE p.is_trainable AND p.split = 'test') GROUP BY ALL\n"
       ]
     },
     {
       "name": "error_by_neighbourhood",
       "displayName": "Error by neighbourhood",
       "queryLines": [
-        "SELECT model_version, city_name, neighbourhood, count(*) AS listings, round(avg(error), 1) AS mean_error,\n",
+        "SELECT model_version, city_name, area, concat(city_name, ' · ', area) AS city_area, count(*) AS listings,\n",
+        "       round(avg(error), 1) AS mean_error, round(percentile(error, 0.5), 1) AS median_error,\n",
         "       round(avg(abs_error), 1) AS model_mae\n",
         "FROM (\n",
-        "SELECT p.model_version, l.city_name, p.listing_id, p.room_type, p.neighbourhood, p.accommodates,\n",
+        "SELECT p.model_version, l.city_name, p.listing_id, p.room_type, p.neighbourhood,\n",
+        "       coalesce(l.neighbourhood_group, l.neighbourhood) AS area, p.accommodates,\n",
         "       p.actual_price, p.predicted_price, p.baseline_price, p.error, p.abs_error,\n",
         "       round(100 * p.pct_error, 1) AS pct_error, p.city_role, l.listing_url\n",
         "FROM workspace.airbnb_gold.price_predictions p JOIN workspace.airbnb_gold.listings l USING (city, listing_id)\n",
-        "WHERE p.is_trainable AND (p.split = 'test' OR p.city_role = 'new')) GROUP BY ALL HAVING count(*) >= 10\n"
+        "WHERE p.is_trainable AND p.split = 'test') GROUP BY ALL HAVING count(*) >= 10\n"
       ]
     }
   ],
@@ -151,8 +183,8 @@
             "name": "overview_title",
             "multilineTextboxSpec": {
               "lines": [
-                "## Boston is the bigger and pricier market: 4,368 listings at a $253 median night vs 2,330 at $215 in Jersey City\n",
-                "Pick a city. Location drives price inside a city (Longwood, North End and Downtown are ~$360+, East Boston ~$220), and ~3 in 4 listings belong to hosts with more than one listing. Prices are USD per night; medians use listings with a valid price."
+                "## Boston has the priciest typical night ($253 median); New York is a monthly-rental market (81% of listings need 30+ nights)\n",
+                "Pick a city. Location drives price inside a city (Boston: Longwood, North End and Downtown ~$360+, East Boston ~$220). Multi-listing hosts run 73–80% of listings in Boston and Jersey City, 57% in New York. Prices are USD per night; medians use listings with a valid price. New York (city C) was added after the model was built."
               ]
             }
           },
@@ -217,6 +249,23 @@
                     }
                   ]
                 }
+              },
+              {
+                "name": "f_city_filter_top_neighbourhoods",
+                "query": {
+                  "datasetName": "top_neighbourhoods",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "city_name",
+                      "expression": "`city_name`"
+                    },
+                    {
+                      "name": "city_name_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ]
+                }
               }
             ],
             "spec": {
@@ -238,6 +287,11 @@
                     "fieldName": "city_name",
                     "displayName": "City",
                     "queryName": "f_city_filter_neighbourhoods"
+                  },
+                  {
+                    "fieldName": "city_name",
+                    "displayName": "City",
+                    "queryName": "f_city_filter_top_neighbourhoods"
                   }
                 ]
               },
@@ -647,7 +701,7 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "neighbourhoods",
+                  "datasetName": "top_neighbourhoods",
                   "disaggregated": true,
                   "fields": [
                     {
@@ -686,7 +740,7 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Neighbourhoods by median price (≥10 priced listings)"
+                "title": "Top 20 neighbourhoods by median price (≥10 priced listings)"
               }
             }
           },
@@ -762,6 +816,10 @@
                   "disaggregated": true,
                   "fields": [
                     {
+                      "name": "neighbourhood_group",
+                      "expression": "`neighbourhood_group`"
+                    },
+                    {
                       "name": "neighbourhood",
                       "expression": "`neighbourhood`"
                     },
@@ -799,46 +857,52 @@
               "encodings": {
                 "columns": [
                   {
+                    "fieldName": "neighbourhood_group",
+                    "displayName": "Borough / area",
+                    "title": "Borough / area",
+                    "order": 0
+                  },
+                  {
                     "fieldName": "neighbourhood",
                     "displayName": "Neighbourhood",
                     "title": "Neighbourhood",
-                    "order": 0
+                    "order": 1
                   },
                   {
                     "fieldName": "listings",
                     "displayName": "Listings",
                     "title": "Listings",
-                    "order": 1
+                    "order": 2
                   },
                   {
                     "fieldName": "median_price",
                     "displayName": "Median price, $",
                     "title": "Median price, $",
-                    "order": 2
+                    "order": 3
                   },
                   {
                     "fieldName": "median_price_entire_home",
                     "displayName": "Median entire home, $",
                     "title": "Median entire home, $",
-                    "order": 3
+                    "order": 4
                   },
                   {
                     "fieldName": "entire_home_pct",
                     "displayName": "Entire homes, %",
                     "title": "Entire homes, %",
-                    "order": 4
+                    "order": 5
                   },
                   {
                     "fieldName": "avg_review_score",
                     "displayName": "Avg review score",
                     "title": "Avg review score",
-                    "order": 5
+                    "order": 6
                   },
                   {
                     "fieldName": "median_availability_365",
                     "displayName": "Median days available",
                     "title": "Median days available",
-                    "order": 6
+                    "order": 7
                   }
                 ]
               },
@@ -1163,8 +1227,8 @@
             "name": "model_title",
             "multilineTextboxSpec": {
               "lines": [
-                "## The model cuts the baseline's error by 41% (MAE $74 vs $125 on test listings), but still under-prices large luxury homes\n",
-                "Baseline = median training price for the same room type and number of guests. Errors are largest for entire homes ($86–90 MAE) and the model under-prices on average (−$26), most in South Boston Waterfront and Back Bay (−$80 per night) and Jersey City Ward D (−$68) — driven by a few luxury homes: the median error there is far smaller."
+                "## 41% better than the baseline at home, but the first New York run under-priced by $128 a night; v2 cuts NYC error from $143 to $115\n",
+                "Test listings only (New York: the same 20% hash split, never trained on). Baseline = median A+B training price for the same room type and guests. v1 = week-1 model; v2 = after the city C changes (market comps, no city-specific features), still trained on Boston + Jersey City; v2_abc = reference retrained with NYC data. Negative error = under-priced: the biggest misses are Manhattan short stays and hotels, and a few luxury homes in Back Bay and Ward D."
               ]
             }
           },
@@ -1177,25 +1241,200 @@
         },
         {
           "widget": {
-            "name": "version_filter",
+            "name": "version_bar",
             "queries": [
               {
-                "name": "f_version_filter_model_metrics",
+                "name": "main_query",
                 "query": {
-                  "datasetName": "model_metrics",
-                  "disaggregated": false,
+                  "datasetName": "mae_by_version",
+                  "disaggregated": true,
                   "fields": [
                     {
-                      "name": "model_version",
-                      "expression": "`model_version`"
+                      "name": "evaluated_on",
+                      "expression": "`evaluated_on`"
                     },
                     {
-                      "name": "model_version_associativity",
-                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                      "name": "mae",
+                      "expression": "`mae`"
+                    },
+                    {
+                      "name": "series",
+                      "expression": "`series`"
                     }
                   ]
                 }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "evaluated_on",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Evaluated on"
+                },
+                "y": {
+                  "fieldName": "mae",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "MAE, $"
+                },
+                "color": {
+                  "fieldName": "series",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Model"
+                }
               },
+              "frame": {
+                "showTitle": true,
+                "title": "Test MAE, $: baseline vs v1 vs v2 — at home and in the new city"
+              },
+              "mark": {
+                "layout": "group"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 2,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "metrics_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "model_metrics",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "model_label",
+                      "expression": "`model_label`"
+                    },
+                    {
+                      "name": "city_name",
+                      "expression": "`city_name`"
+                    },
+                    {
+                      "name": "n",
+                      "expression": "`n`"
+                    },
+                    {
+                      "name": "baseline_mae",
+                      "expression": "`baseline_mae`"
+                    },
+                    {
+                      "name": "model_mae",
+                      "expression": "`model_mae`"
+                    },
+                    {
+                      "name": "improvement_pct",
+                      "expression": "`improvement_pct`"
+                    },
+                    {
+                      "name": "model_median_ae",
+                      "expression": "`model_median_ae`"
+                    },
+                    {
+                      "name": "model_mape_pct",
+                      "expression": "`model_mape_pct`"
+                    },
+                    {
+                      "name": "model_bias",
+                      "expression": "`model_bias`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "model_label",
+                    "displayName": "Model",
+                    "title": "Model",
+                    "order": 0
+                  },
+                  {
+                    "fieldName": "city_name",
+                    "displayName": "City",
+                    "title": "City",
+                    "order": 1
+                  },
+                  {
+                    "fieldName": "n",
+                    "displayName": "Test listings",
+                    "title": "Test listings",
+                    "order": 2
+                  },
+                  {
+                    "fieldName": "baseline_mae",
+                    "displayName": "Baseline MAE, $",
+                    "title": "Baseline MAE, $",
+                    "order": 3
+                  },
+                  {
+                    "fieldName": "model_mae",
+                    "displayName": "Model MAE, $",
+                    "title": "Model MAE, $",
+                    "order": 4
+                  },
+                  {
+                    "fieldName": "improvement_pct",
+                    "displayName": "Improvement, %",
+                    "title": "Improvement, %",
+                    "order": 5
+                  },
+                  {
+                    "fieldName": "model_median_ae",
+                    "displayName": "Median abs. error, $",
+                    "title": "Median abs. error, $",
+                    "order": 6
+                  },
+                  {
+                    "fieldName": "model_mape_pct",
+                    "displayName": "MAPE, %",
+                    "title": "MAPE, %",
+                    "order": 7
+                  },
+                  {
+                    "fieldName": "model_bias",
+                    "displayName": "Mean error (bias), $",
+                    "title": "Mean error (bias), $",
+                    "order": 8
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Test-set error by model version and city"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 2,
+            "width": 4,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "version_filter",
+            "queries": [
               {
                 "name": "f_version_filter_predictions",
                 "query": {
@@ -1255,29 +1494,24 @@
                 "fields": [
                   {
                     "fieldName": "model_version",
-                    "displayName": "Model version",
-                    "queryName": "f_version_filter_model_metrics"
-                  },
-                  {
-                    "fieldName": "model_version",
-                    "displayName": "Model version",
+                    "displayName": "Model version (charts below)",
                     "queryName": "f_version_filter_predictions"
                   },
                   {
                     "fieldName": "model_version",
-                    "displayName": "Model version",
+                    "displayName": "Model version (charts below)",
                     "queryName": "f_version_filter_error_by_room"
                   },
                   {
                     "fieldName": "model_version",
-                    "displayName": "Model version",
+                    "displayName": "Model version (charts below)",
                     "queryName": "f_version_filter_error_by_neighbourhood"
                   }
                 ]
               },
               "frame": {
                 "showTitle": true,
-                "title": "Model version"
+                "title": "Model version (charts below)"
               },
               "selection": {
                 "defaultSelection": {
@@ -1285,7 +1519,7 @@
                     "dataType": "STRING",
                     "values": [
                       {
-                        "value": "v1"
+                        "value": "v2"
                       }
                     ]
                   }
@@ -1295,133 +1529,9 @@
           },
           "position": {
             "x": 0,
-            "y": 2,
+            "y": 7,
             "width": 2,
             "height": 2
-          }
-        },
-        {
-          "widget": {
-            "name": "metrics_table",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "model_metrics",
-                  "disaggregated": true,
-                  "fields": [
-                    {
-                      "name": "city_name",
-                      "expression": "`city_name`"
-                    },
-                    {
-                      "name": "split",
-                      "expression": "`split`"
-                    },
-                    {
-                      "name": "n",
-                      "expression": "`n`"
-                    },
-                    {
-                      "name": "baseline_mae",
-                      "expression": "`baseline_mae`"
-                    },
-                    {
-                      "name": "model_mae",
-                      "expression": "`model_mae`"
-                    },
-                    {
-                      "name": "improvement_pct",
-                      "expression": "`improvement_pct`"
-                    },
-                    {
-                      "name": "model_median_ae",
-                      "expression": "`model_median_ae`"
-                    },
-                    {
-                      "name": "model_mape_pct",
-                      "expression": "`model_mape_pct`"
-                    },
-                    {
-                      "name": "model_bias",
-                      "expression": "`model_bias`"
-                    }
-                  ]
-                }
-              }
-            ],
-            "spec": {
-              "version": 1,
-              "widgetType": "table",
-              "encodings": {
-                "columns": [
-                  {
-                    "fieldName": "city_name",
-                    "displayName": "City",
-                    "title": "City",
-                    "order": 0
-                  },
-                  {
-                    "fieldName": "split",
-                    "displayName": "Evaluated on",
-                    "title": "Evaluated on",
-                    "order": 1
-                  },
-                  {
-                    "fieldName": "n",
-                    "displayName": "Listings",
-                    "title": "Listings",
-                    "order": 2
-                  },
-                  {
-                    "fieldName": "baseline_mae",
-                    "displayName": "Baseline MAE, $",
-                    "title": "Baseline MAE, $",
-                    "order": 3
-                  },
-                  {
-                    "fieldName": "model_mae",
-                    "displayName": "Model MAE, $",
-                    "title": "Model MAE, $",
-                    "order": 4
-                  },
-                  {
-                    "fieldName": "improvement_pct",
-                    "displayName": "Improvement, %",
-                    "title": "Improvement, %",
-                    "order": 5
-                  },
-                  {
-                    "fieldName": "model_median_ae",
-                    "displayName": "Median abs. error, $",
-                    "title": "Median abs. error, $",
-                    "order": 6
-                  },
-                  {
-                    "fieldName": "model_mape_pct",
-                    "displayName": "MAPE, %",
-                    "title": "MAPE, %",
-                    "order": 7
-                  },
-                  {
-                    "fieldName": "model_bias",
-                    "displayName": "Mean error (bias), $",
-                    "title": "Mean error (bias), $",
-                    "order": 8
-                  }
-                ]
-              },
-              "frame": {
-                "showTitle": true,
-                "title": "Test-set error: model vs baseline (median price for the same room type and guests)"
-              }
-            }
-          },
-          "position": {
-            "x": 2,
-            "y": 2,
-            "width": 4,
-            "height": 5
           }
         },
         {
@@ -1484,7 +1594,7 @@
           },
           "position": {
             "x": 0,
-            "y": 7,
+            "y": 9,
             "width": 3,
             "height": 7
           }
@@ -1552,7 +1662,7 @@
           },
           "position": {
             "x": 3,
-            "y": 7,
+            "y": 9,
             "width": 3,
             "height": 7
           }
@@ -1572,8 +1682,8 @@
                       "expression": "`mean_error`"
                     },
                     {
-                      "name": "neighbourhood",
-                      "expression": "`neighbourhood`"
+                      "name": "city_area",
+                      "expression": "`city_area`"
                     },
                     {
                       "name": "city_name",
@@ -1595,14 +1705,14 @@
                   "displayName": "Mean error, $"
                 },
                 "y": {
-                  "fieldName": "neighbourhood",
+                  "fieldName": "city_area",
                   "scale": {
                     "type": "categorical",
                     "sort": {
                       "by": "x"
                     }
                   },
-                  "displayName": "Neighbourhood"
+                  "displayName": "Area"
                 },
                 "color": {
                   "fieldName": "city_name",
@@ -1614,13 +1724,13 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Mean error by neighbourhood (negative = model under-prices)"
+                "title": "Mean error by area — neighbourhood (Boston, Jersey City) or borough (New York); negative = under-priced"
               }
             }
           },
           "position": {
             "x": 0,
-            "y": 14,
+            "y": 16,
             "width": 6,
             "height": 8
           }
@@ -1754,7 +1864,7 @@
           },
           "position": {
             "x": 0,
-            "y": 22,
+            "y": 24,
             "width": 6,
             "height": 8
           }
