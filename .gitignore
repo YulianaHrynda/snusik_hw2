@@ -1,0 +1,21 @@
+# local environment
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
+
+# downloaded raw data (re-downloadable from Inside Airbnb)
+data/
+
+# local Spark lakehouse used when Databricks compute is unavailable
+.local_lakehouse/
+spark-warehouse/
+metastore_db/
+derby.log
+
+# Databricks bundle state
+.databricks/
+
+# MLflow local runs
+mlruns/
