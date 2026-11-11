@@ -1,6 +1,13 @@
 # snusik_hw2 — Airbnb price lakehouse (US Northeast)
 
-Group Assignment 2, team **Snusik**.
+Group Assignment 2, team **Snusik**: Yuliana Hrynda, Ostap Mnykh, Mykhailo Brytan, Yulian Zaiats.
+
+| Member | GitHub |
+|---|---|
+| Yuliana Hrynda | [@YulianaHrynda](https://github.com/YulianaHrynda) |
+| Ostap Mnykh | [@ostapmn](https://github.com/ostapmn) |
+| Mykhailo Brytan | [@Trix1331](https://github.com/Trix1331) |
+| Yulian Zaiats | [@Scorpion1355](https://github.com/Scorpion1355) |
 
 | Item | Value |
 |---|---|
