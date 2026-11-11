@@ -19,3 +19,6 @@ derby.log
 
 # MLflow local runs
 mlruns/
+
+# presentation is shared separately
+presentation/
