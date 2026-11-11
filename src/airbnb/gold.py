@@ -35,7 +35,7 @@ def build_listings(silver: DataFrame, city_name: str) -> DataFrame:
     """Curated listing-level table for the dashboard and Genie (no free text, no leak columns)."""
     return silver.select(
         "listing_id", "city", F.lit(city_name).alias("city_name"), "snapshot_date", "name", "listing_url",
-        "neighbourhood", "latitude", "longitude", "room_type", "property_type",
+        "neighbourhood_group", "neighbourhood", "latitude", "longitude", "room_type", "property_type",
         "accommodates", "bedrooms", "beds", "bathrooms", "bath_shared",
         "price", "price_class", "has_valid_price",
         F.expr("try_divide(price, accommodates)").alias("price_per_guest"),
@@ -55,6 +55,7 @@ def build_city_metrics(silver: DataFrame, city_name: str) -> DataFrame:
         F.sum(F.col(vp).cast("int")).alias("priced_listings"),
         F.countDistinct("host_id").alias("hosts"),
         F.countDistinct("neighbourhood").alias("neighbourhoods"),
+        F.countDistinct("neighbourhood_group").alias("neighbourhood_groups"),
         F.expr(f"percentile(CASE WHEN {vp} THEN price END, 0.5)").alias("median_price"),
         F.expr(f"percentile(CASE WHEN {vp} THEN price END, 0.25)").alias("p25_price"),
         F.expr(f"percentile(CASE WHEN {vp} THEN price END, 0.75)").alias("p75_price"),
@@ -81,7 +82,7 @@ def build_city_metrics(silver: DataFrame, city_name: str) -> DataFrame:
 
 def build_neighbourhood_metrics(silver: DataFrame, city_name: str) -> DataFrame:
     vp = "has_valid_price"
-    agg = silver.groupBy("city", "neighbourhood").agg(
+    agg = silver.groupBy("city", "neighbourhood_group", "neighbourhood").agg(
         F.lit(city_name).alias("city_name"),
         F.count("*").alias("listings"),
         F.sum(F.col(vp).cast("int")).alias("priced_listings"),
@@ -106,7 +107,7 @@ def build_listing_features(silver: DataFrame) -> DataFrame:
         F.expr(SPLIT_EXPR).alias("split"),
         "price", "price_class",
         F.col("has_valid_price").alias("is_trainable"),
-        "room_type", "property_type", "neighbourhood", "latitude", "longitude",
+        "room_type", "property_type", "neighbourhood_group", "neighbourhood", "latitude", "longitude",
         "accommodates", "bedrooms", "beds", "bathrooms", "bath_shared",
         F.expr("CASE WHEN amenities IS NULL THEN NULL ELSE size(amenities) END").alias("n_amenities"),
         *amenity_cols,

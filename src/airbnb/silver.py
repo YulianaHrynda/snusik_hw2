@@ -53,6 +53,7 @@ SILVER_SELECT = [
     _double("hosts_time_as_host_years", "host_years"),
     _int("calculated_host_listings_count", "host_listings_count"),
     "neighbourhood_cleansed AS neighbourhood",
+    "nullif(trim(neighbourhood_group_cleansed), '') AS neighbourhood_group",  # e.g. NYC borough; empty in A/B
     _double("latitude"),
     _double("longitude"),
     "property_type",
@@ -81,6 +82,18 @@ SILVER_SELECT = [
     "license",
 ]
 
+# Source columns the pipeline cannot work without; any other column it reads is optional and is
+# added as NULL (with a warning) when a city's file does not have it.
+REQUIRED_COLUMNS = ["id", "price", "room_type", "accommodates", "latitude", "longitude", "neighbourhood_cleansed"]
+
+# Expected ranges, from Boston and Jersey City. Outside them the run continues but logs a warning.
+PROFILE_LIMITS = {
+    "missing_price_share": 0.25,
+    "implausible_share": 0.002,
+    "monthly_stay_share": 0.60,
+    "stale_share": 0.25,
+}
+
 # raw column -> silver column, checked for values that were present but failed to parse
 PARSE_CHECKS = {
     "id": "listing_id", "price": "price", "accommodates": "accommodates", "bedrooms": "bedrooms",
@@ -91,8 +104,47 @@ PARSE_CHECKS = {
 }
 
 
+# Every raw column SILVER_SELECT reads.
+SOURCE_COLUMNS = [
+    "id", "last_scraped", "source", "listing_url", "name", "host_id", "host_name", "host_is_superhost",
+    "host_identity_verified", "host_has_profile_pic", "hosts_time_as_host_years", "calculated_host_listings_count",
+    "neighbourhood_cleansed", "neighbourhood_group_cleansed", "latitude", "longitude", "property_type", "room_type",
+    "accommodates", "bedrooms", "beds", "bathrooms_text", "amenities", "price", "minimum_nights", "maximum_nights",
+    "has_availability", "availability_30", "availability_60", "availability_90", "availability_365",
+    "number_of_reviews", "number_of_reviews_ltm", "first_review", "last_review", *REVIEW_SCORES,
+    "reviews_per_month", "license",
+]
+
+
+def align_schema(bronze: DataFrame) -> tuple[DataFrame, list[str]]:
+    """Fail on missing required columns; add missing optional ones as NULL and report them."""
+    present = set(bronze.columns)
+    missing_required = [c for c in REQUIRED_COLUMNS if c not in present]
+    if missing_required:
+        raise ValueError(f"source file lacks required columns {missing_required}")
+    missing_optional = sorted(c for c in SOURCE_COLUMNS if c not in present)
+    for c in missing_optional:
+        bronze = bronze.withColumn(c, F.lit(None).cast("string"))
+    return bronze, missing_optional
+
+
 def type_and_clean(bronze: DataFrame) -> DataFrame:
     return bronze.selectExpr(*SILVER_SELECT)
+
+
+def profile(silver: DataFrame) -> tuple[dict, list[str]]:
+    """Shares that describe the market and the target; warnings when outside PROFILE_LIMITS."""
+    row = silver.agg(
+        F.avg(F.expr("CAST(price_class = 'missing' AS DOUBLE)")).alias("missing_price_share"),
+        F.avg(F.expr("CAST(price_class = 'implausible' AS DOUBLE)")).alias("implausible_share"),
+        F.avg(F.col("monthly_stay").cast("double")).alias("monthly_stay_share"),
+        F.avg(F.col("is_stale").cast("double")).alias("stale_share"),
+        F.avg(F.expr("CAST(neighbourhood_group IS NOT NULL AS DOUBLE)")).alias("neighbourhood_group_filled_share"),
+    ).first().asDict()
+    prof = {k: round(float(v or 0), 4) for k, v in row.items()}
+    warnings = [f"{k} = {prof[k]:.1%} is above the expected {limit:.1%}"
+                for k, limit in PROFILE_LIMITS.items() if prof[k] > limit]
+    return prof, warnings
 
 
 def parse_report(bronze: DataFrame, typed: DataFrame) -> dict:
@@ -128,12 +180,16 @@ def add_flags(df: DataFrame) -> DataFrame:
 
 
 def build_silver(bronze: DataFrame) -> tuple[DataFrame, dict]:
+    bronze, missing_optional = align_schema(bronze)
     typed = type_and_clean(bronze)
-    report = {"rows_in": bronze.count(), "parse_failures": parse_report(bronze, typed)}
+    report = {"rows_in": bronze.count(), "parse_failures": parse_report(bronze, typed),
+              "missing_optional_columns": missing_optional}
     valid = typed.where("listing_id IS NOT NULL")
     report["dropped_null_id"] = report["rows_in"] - valid.count()
     deduped = deduplicate(valid)
     silver = add_flags(deduped)
     report["rows_out"] = silver.count()
     report["dropped_duplicates"] = report["rows_in"] - report["dropped_null_id"] - report["rows_out"]
+    report["profile"], report["warnings"] = profile(silver)
+    report["warnings"] += [f"source column '{c}' missing, filled with NULL" for c in missing_optional]
     return silver, report

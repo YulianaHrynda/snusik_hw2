@@ -21,7 +21,8 @@ import pandas as pd
 
 from airbnb.tables import pandas_to_spark
 from airbnb.config import lakehouse_from, read_params
-from airbnb.modelling import load_artifact, metrics_rows, prediction_frame, prepare
+from airbnb.modelling import drift_report, load_artifact, metrics_rows, prediction_frame, prepare
+from airbnb.runlog import log_step
 
 params = read_params(dbutils, city="boston", model_version="v1", catalog="workspace", raw_root="", artifacts_root="")
 lh = lakehouse_from(params)
@@ -37,6 +38,15 @@ pdf = spark.table(lh.table("gold", "listing_features")).where(f"city = '{city}'"
 if pdf.empty:
     raise ValueError(f"no gold features for city '{city}'; run airbnb_city_pipeline first")
 data = prepare(pdf)
+
+# Input drift against the model's training rows: unseen categories, numbers outside the training range
+train_list = ", ".join(f"'{c}'" for c in artifact["train_cities"])
+train_rows = prepare(spark.table(lh.table("gold", "listing_features"))
+                     .where(f"city IN ({train_list}) AND split = 'train' AND is_trainable").toPandas())
+drift = drift_report(train_rows, data, features)
+flagged = {k: v for k, v in drift.items() if max(v.values()) > 0.05}
+print("input drift (> 5% of rows unseen / out of range):", json.dumps(flagged, indent=1))
+log_step(spark, lh, city, "", f"score_drift_{version}", len(data), None, drift)
 
 pred = model.predict(data[features])
 base = baseline.predict(data)

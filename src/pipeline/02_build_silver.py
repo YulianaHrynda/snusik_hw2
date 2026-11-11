@@ -26,6 +26,8 @@ city = get_city(params["city"], params["snapshot_date"])
 bronze = spark.table(lh.table("bronze", "listings_raw")).where(f"city = '{city.key}'")
 silver, report = build_silver(bronze)
 print(report)
+for w in report["warnings"]:
+    print(f"WARNING [{city.key}]: {w}")
 
 # COMMAND ----------
 

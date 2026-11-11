@@ -182,3 +182,24 @@ def prediction_frame(pdf: pd.DataFrame, pred: np.ndarray, base: np.ndarray, mode
     out["pct_error"] = out["error"] / out["actual_price"]
     out["predicted_at"] = pd.Timestamp.now(tz="UTC").tz_localize(None)
     return out
+
+
+# ----------------------------------------------------------------------------- drift
+def drift_report(train: pd.DataFrame, new: pd.DataFrame, features: list[str]) -> dict:
+    """How much of a new city's input the model has never seen.
+
+    Categorical: share of rows whose level does not occur in training.
+    Numeric: share of rows outside the training [min, max].
+    """
+    report = {}
+    for c in features:
+        if c not in new.columns or c not in train.columns:
+            continue
+        if c in CATEGORICAL:
+            seen = set(train[c].dropna().unique())
+            report[c] = {"unseen_share": round(float((~new[c].isin(seen)).mean()), 4)}
+        else:
+            lo, hi = train[c].min(), train[c].max()
+            v = new[c].dropna()
+            report[c] = {"out_of_range_share": round(float(((v < lo) | (v > hi)).mean()) if len(v) else 0.0, 4)}
+    return report

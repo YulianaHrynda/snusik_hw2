@@ -1,0 +1,26 @@
+26/11/11 21:19:11 ERROR HiveAlterHandler: Failed to alter table airbnb_gold.price_predictions
+26/11/11 21:19:13 ERROR HiveAlterHandler: Failed to alter table airbnb_gold.model_metrics
+=== src/model/02_score_city.py {'city': 'new-york-city', 'model_version': 'v1'}
+model v1: hgb_log_l1_deep trained on ['boston', 'jersey-city'] at 2026-11-11T19:07:11+00:00
+input drift (> 5% of rows unseen / out of range): {
+ "city": {
+  "unseen_share": 1.0
+ },
+ "neighbourhood": {
+  "unseen_share": 0.9917
+ },
+ "latitude": {
+  "out_of_range_share": 0.2306
+ },
+ "host_listings_count": {
+  "out_of_range_share": 0.0797
+ }
+}
+new-york-city: 29918 listings scored as a new city
+  split       scope  ...  model_mape  model_bias
+0  test   trainable  ...    0.352310 -127.647391
+1   all   trainable  ...    0.345981 -121.968170
+2   all  all_priced  ...    0.349293 -146.056447
+[3 rows x 10 columns]
+spark_catalog.airbnb_gold.price_predictions: 29918 rows for new-york-city | spark_catalog.airbnb_gold.model_metrics: 3 rows
+=== done in 12s -> {"city": "new-york-city", "model_version": "v1", "metrics": {"test/trainable": {"n": 3814, "model_mae": 143.16055322496067, "baseline_mae": 164.15969847928682}, "all/trainable": {"n": 19295, "model_mae": 137.58446540554547, "baseline_mae": 159.00191655869395}, "all/all_priced": {"n": 19406, "model_mae": 161.58341904565597, "baseline_mae": 182.8778202617747}}}
