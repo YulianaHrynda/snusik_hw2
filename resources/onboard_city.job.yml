@@ -1,0 +1,24 @@
+# A new client city: run the unchanged city pipeline, then score it with an existing model version.
+resources:
+  jobs:
+    airbnb_onboard_city:
+      name: airbnb_onboard_city
+      description: "City pipeline + scoring with a saved model version (no refit)."
+      parameters:
+        - name: city
+          default: new-york-city
+        - name: model_version
+          default: v1
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: city_pipeline
+          run_job_task:
+            job_id: ${resources.jobs.airbnb_city_pipeline.id}
+            job_parameters:
+              city: "{{job.parameters.city}}"
+              catalog: "{{job.parameters.catalog}}"
+        - task_key: score
+          depends_on: [{ task_key: city_pipeline }]
+          notebook_task:
+            notebook_path: ../src/model/02_score_city.py

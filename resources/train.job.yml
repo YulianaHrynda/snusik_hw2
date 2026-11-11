@@ -1,0 +1,28 @@
+# ETL for the training cities, then train + evaluate the price model and save it as `model_version`.
+resources:
+  jobs:
+    airbnb_train_price_model:
+      name: airbnb_train_price_model
+      description: "Refresh the training cities, train the price model, write predictions and metrics to gold."
+      parameters:
+        - name: train_cities
+          default: '["boston", "jersey-city"]'
+        - name: model_version
+          default: v1
+        - name: model_name
+          default: auto        # auto = lowest 5-fold CV MAE on the training split
+        - name: overwrite
+          default: "false"     # model versions are immutable unless explicitly overwritten
+        - name: catalog
+          default: ${var.catalog}
+      tasks:
+        - task_key: etl
+          run_job_task:
+            job_id: ${resources.jobs.airbnb_etl.id}
+            job_parameters:
+              cities: "{{job.parameters.train_cities}}"
+              catalog: "{{job.parameters.catalog}}"
+        - task_key: train
+          depends_on: [{ task_key: etl }]
+          notebook_task:
+            notebook_path: ../src/model/01_train_price_model.py

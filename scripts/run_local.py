@@ -7,6 +7,8 @@ The notebooks are executed unchanged: a tiny shim provides `spark`, `dbutils.wid
 ./.local_lakehouse/artifacts. The presets mirror the jobs in resources/*.yml.
 
     python scripts/run_local.py city-pipeline --city boston
+    python scripts/run_local.py train --train-cities boston,jersey-city --model-version v1
+    python scripts/run_local.py onboard --city new-york-city --model-version v1
     python scripts/run_local.py notebook src/pipeline/02_build_silver.py --param city=boston
     python scripts/run_local.py sql "SELECT * FROM spark_catalog.airbnb_gold.city_metrics"
 """
@@ -138,6 +140,17 @@ def main(argv=None):
     p = sub.add_parser("city-pipeline", help="setup -> bronze -> silver -> gold for one or more cities")
     p.add_argument("--city", required=True, help="city key or comma-separated keys")
 
+    p = sub.add_parser("train", help="mirror of job airbnb_train_price_model")
+    p.add_argument("--train-cities", default="boston,jersey-city")
+    p.add_argument("--model-version", default="v1")
+    p.add_argument("--model-name", default="auto")
+    p.add_argument("--overwrite", default="false")
+    p.add_argument("--skip-etl", action="store_true")
+
+    p = sub.add_parser("onboard", help="mirror of job airbnb_onboard_city")
+    p.add_argument("--city", required=True)
+    p.add_argument("--model-version", default="v1")
+
     p = sub.add_parser("notebook", help="run a single notebook")
     p.add_argument("path")
     p.add_argument("--param", action="append", default=[], help="key=value widget value")
@@ -153,6 +166,19 @@ def main(argv=None):
         for city in [c.strip() for c in args.city.split(",") if c.strip()]:
             for nb in CITY_PIPELINE:
                 run_notebook(spark, nb, {"city": city})
+    elif args.cmd == "train":
+        cities = [c.strip() for c in args.train_cities.split(",") if c.strip()]
+        if not args.skip_etl:
+            for city in cities:
+                for nb in CITY_PIPELINE:
+                    run_notebook(spark, nb, {"city": city})
+        run_notebook(spark, "src/model/01_train_price_model.py",
+                     {"train_cities": ",".join(cities), "model_version": args.model_version,
+                      "model_name": args.model_name, "overwrite": args.overwrite})
+    elif args.cmd == "onboard":
+        for nb in CITY_PIPELINE:
+            run_notebook(spark, nb, {"city": args.city})
+        run_notebook(spark, "src/model/02_score_city.py", {"city": args.city, "model_version": args.model_version})
     elif args.cmd == "notebook":
         run_notebook(spark, args.path, dict(kv.split("=", 1) for kv in args.param))
     elif args.cmd == "sql":

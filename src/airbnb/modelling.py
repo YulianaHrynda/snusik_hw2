@@ -1,0 +1,184 @@
+"""Price model: features, baseline, candidate models, metrics and artifact storage."""
+from __future__ import annotations
+
+import json
+import os
+from datetime import datetime, timezone
+
+import joblib
+import numpy as np
+import pandas as pd
+import sklearn
+from sklearn.compose import ColumnTransformer, TransformedTargetRegressor
+from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import Ridge
+from sklearn.pipeline import Pipeline, make_pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+from airbnb.gold import AMENITY_FLAGS
+
+CATEGORICAL = ["city", "room_type", "property_type", "neighbourhood"]
+NUMERIC = [
+    "latitude", "longitude", "accommodates", "bedrooms", "beds", "bathrooms", "n_amenities",
+    "minimum_nights", "host_listings_count", "host_years", "number_of_reviews",
+    "review_scores_rating", "review_scores_cleanliness", "review_scores_location", "review_scores_value",
+]
+BOOLEAN = ["bath_shared", "monthly_stay", "host_is_superhost", "host_identity_verified", "has_reviews",
+           *AMENITY_FLAGS]
+FEATURES = CATEGORICAL + NUMERIC + BOOLEAN
+TARGET = "price"
+RANDOM_STATE = 42
+
+
+# ----------------------------------------------------------------------------- data
+def prepare(pdf: pd.DataFrame) -> pd.DataFrame:
+    """Give every feature a model-friendly dtype (Spark booleans with NULLs arrive as objects)."""
+    out = pdf.copy()
+    for c in BOOLEAN:
+        out[c] = out[c].map({True: 1.0, False: 0.0}).astype("float64")
+    for c in NUMERIC:
+        out[c] = pd.to_numeric(out[c], errors="coerce").astype("float64")
+    for c in CATEGORICAL:
+        out[c] = out[c].astype("object").where(out[c].notna(), "unknown").astype(str)
+    return out
+
+
+# ----------------------------------------------------------------------------- baseline
+class MedianBaseline:
+    """Median training price for the same (room_type, accommodates).
+
+    Unseen combinations fall back to the room-type median, then to the global median.
+    """
+
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> "MedianBaseline":
+        d = X[["room_type", "accommodates"]].assign(y=y.values)
+        self.by_room_acc_ = d.groupby(["room_type", "accommodates"])["y"].median().to_dict()
+        self.by_room_ = d.groupby("room_type")["y"].median().to_dict()
+        self.global_ = float(d["y"].median())
+        return self
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        keys = zip(X["room_type"], X["accommodates"])
+        return np.array([
+            self.by_room_acc_.get((r, a), self.by_room_.get(r, self.global_)) for r, a in keys
+        ], dtype=float)
+
+    def table(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            [(r, a, p) for (r, a), p in self.by_room_acc_.items()],
+            columns=["room_type", "accommodates", "baseline_price"],
+        )
+
+
+# ----------------------------------------------------------------------------- models
+def _onehot() -> OneHotEncoder:
+    return OneHotEncoder(handle_unknown="infrequent_if_exist", min_frequency=10, sparse_output=False)
+
+
+def make_ridge(alpha: float = 3.0):
+    pre = ColumnTransformer([
+        ("cat", _onehot(), CATEGORICAL),
+        ("num", make_pipeline(SimpleImputer(strategy="median", add_indicator=True), StandardScaler()),
+         NUMERIC + BOOLEAN),
+    ])
+    reg = Pipeline([("pre", pre), ("ridge", Ridge(alpha=alpha))])
+    return TransformedTargetRegressor(regressor=reg, func=np.log, inverse_func=np.exp)
+
+
+def make_hgb(loss: str = "squared_error", max_iter: int = 400, max_leaf_nodes: int = 31,
+             learning_rate: float = 0.05, min_samples_leaf: int = 20):
+    """Gradient-boosted trees on log price. NaNs are handled natively (no imputation)."""
+    pre = ColumnTransformer([("cat", _onehot(), CATEGORICAL), ("num", "passthrough", NUMERIC + BOOLEAN)])
+    hgb = HistGradientBoostingRegressor(
+        loss=loss, max_iter=max_iter, max_leaf_nodes=max_leaf_nodes, learning_rate=learning_rate,
+        min_samples_leaf=min_samples_leaf, l2_regularization=1.0, early_stopping=False,
+        random_state=RANDOM_STATE,
+    )
+    reg = Pipeline([("pre", pre), ("hgb", hgb)])
+    return TransformedTargetRegressor(regressor=reg, func=np.log, inverse_func=np.exp)
+
+
+CANDIDATES = {
+    "ridge_log": lambda: make_ridge(alpha=3.0),
+    "hgb_log_l2": lambda: make_hgb(loss="squared_error"),
+    "hgb_log_l1": lambda: make_hgb(loss="absolute_error"),
+    "hgb_log_l1_deep": lambda: make_hgb(loss="absolute_error", max_iter=800, max_leaf_nodes=63, learning_rate=0.03),
+}
+
+
+# ----------------------------------------------------------------------------- metrics
+def error_metrics(y_true, y_pred, prefix: str) -> dict:
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    ae = np.abs(y_pred - y_true)
+    if len(y_true) == 0:
+        return {f"{prefix}_mae": None, f"{prefix}_median_ae": None, f"{prefix}_mape": None,
+                f"{prefix}_within_25pct": None, f"{prefix}_bias": None}
+    return {
+        f"{prefix}_mae": float(ae.mean()),
+        f"{prefix}_median_ae": float(np.median(ae)),
+        f"{prefix}_mape": float(np.mean(ae / y_true)),
+        f"{prefix}_within_25pct": float(np.mean(ae / y_true <= 0.25)),
+        f"{prefix}_bias": float(np.mean(y_pred - y_true)),  # > 0: over-pricing on average
+    }
+
+
+def metrics_rows(df: pd.DataFrame, model_version: str, model_name: str, split: str, scope: str,
+                 group_cols=("city",)) -> list[dict]:
+    """Model vs baseline metrics per city and for all cities together."""
+    rows = []
+    groups = [(g, d) for g, d in df.groupby(list(group_cols))] + [(("ALL",), df)]
+    for key, d in groups:
+        key = key if isinstance(key, tuple) else (key,)
+        row = {"model_version": model_version, "model_name": model_name, "split": split, "scope": scope,
+               "city": key[0], "n": int(len(d))}
+        row.update(error_metrics(d["price"], d["predicted_price"], "model"))
+        row.update(error_metrics(d["price"], d["baseline_price"], "baseline"))
+        if row["baseline_mae"]:
+            row["mae_improvement_pct"] = float(1 - row["model_mae"] / row["baseline_mae"])
+        else:
+            row["mae_improvement_pct"] = None
+        rows.append(row)
+    return rows
+
+
+# ----------------------------------------------------------------------------- artifacts
+def model_dir(artifacts_root: str, version: str) -> str:
+    return os.path.join(artifacts_root, "models", version)
+
+
+def save_artifact(artifacts_root: str, version: str, payload: dict, overwrite: bool = False) -> str:
+    d = model_dir(artifacts_root, version)
+    path = os.path.join(d, "model.joblib")
+    if os.path.exists(path) and not overwrite:
+        raise FileExistsError(f"model {version} already exists at {path}; models are never overwritten "
+                              f"(pass overwrite=true or use a new model_version)")
+    os.makedirs(d, exist_ok=True)
+    payload = {**payload, "sklearn_version": sklearn.__version__,
+               "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    joblib.dump(payload, path)
+    with open(os.path.join(d, "card.json"), "w", encoding="utf-8") as f:
+        json.dump({k: v for k, v in payload.items() if k not in ("model", "baseline")}, f, indent=2, default=str)
+    return path
+
+
+def load_artifact(artifacts_root: str, version: str) -> dict:
+    return joblib.load(os.path.join(model_dir(artifacts_root, version), "model.joblib"))
+
+
+def prediction_frame(pdf: pd.DataFrame, pred: np.ndarray, base: np.ndarray, model_version: str,
+                     city_role: dict) -> pd.DataFrame:
+    out = pdf[["listing_id", "city", "split", "is_trainable", "price_class", "room_type", "neighbourhood",
+               "accommodates", "bedrooms", "monthly_stay", "latitude", "longitude", "price"]].copy()
+    out = out.rename(columns={"price": "actual_price"})
+    out["monthly_stay"] = out["monthly_stay"].fillna(False).astype(bool)
+    out.insert(0, "model_version", model_version)
+    out["city_role"] = out["city"].map(city_role).fillna("new")
+    out["predicted_price"] = np.round(pred, 2)
+    out["baseline_price"] = np.round(base, 2)
+    out["error"] = out["predicted_price"] - out["actual_price"]  # > 0: model over-prices
+    out["abs_error"] = out["error"].abs()
+    out["pct_error"] = out["error"] / out["actual_price"]
+    out["predicted_at"] = pd.Timestamp.now(tz="UTC").tz_localize(None)
+    return out
