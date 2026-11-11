@@ -170,6 +170,21 @@ Manhattan short-stay and hotel prices are not reliable without NYC training data
 NYC snapshot (the `v2_abc` experiment) brings the city to \$87.58, and that is what we would ship
 after the first week with the client.
 
+## Reproduced on Databricks
+
+The numbers above come from the local run of the notebooks. The same jobs were later run on
+Databricks serverless and give the same picture (test MAE, USD):
+
+| | Baseline | `v1` | `v2` | `v2_abc` |
+|---|---:|---:|---:|---:|
+| Boston + Jersey City — local | 124.67 | 73.63 | 76.13 | – |
+| Boston + Jersey City — Databricks | 124.67 | 73.69 | 75.28 | – |
+| New York — local | 164.16 | 143.16 | 114.70 | 87.58 |
+| New York — Databricks | 164.16 | 144.19 | 115.08 | 87.59 |
+
+Mean error on New York with `v1` on Databricks: −\$129.0 (local −\$127.6). The differences come from
+the scikit-learn version of the serverless environment; the baselines, splits and data are identical.
+
 ## How to reproduce
 
 ```bash

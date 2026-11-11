@@ -101,8 +101,22 @@ Staten Island \$40.9 → \$42.7.
 **"Compare the median price of private rooms across cities"** — Boston \$118.70, New York
 \$114.56, Jersey City \$80.32.
 
-## Status
+## Status — deployed and tested on Databricks
 
-The space definition was accepted by the Genie API up to table validation: creation is refused
-until `workspace.airbnb_gold.*` exist in Unity Catalog, which requires one run of the jobs on
-Databricks (see README → "Running on Databricks").
+The space *Airbnb US Northeast — prices and price model (Snusik)* was created with
+`python genie/deploy_genie.py` (id in [`genie/.space_id`](../genie/.space_id)) after the column
+comments notebook ran. Asked through the API, it generated exactly the example SQL and answered:
+
+| Question | Genie's answer (Databricks tables) |
+|---|---|
+| What is the median price of entire homes in City A? | \$297.16 per night, 2,391 listings |
+| Which neighbourhoods in City B have the most listings? | Ward D 533, Ward F 479, Ward C 453, … |
+| Where does the model under-price listings the most? | Manhattan: mean error −\$127.7 (median −\$27.0), then Back Bay −\$84.2 and South Boston Waterfront −\$65.0 (`v2`, test listings) |
+| How much better is the model than the baseline in each city? | `v2`: Boston 41.5%, Jersey City 35.8%, New York 29.9% |
+| How well did the first run of the model price New York, by borough? | `v1`: Manhattan MAE \$232.9 (mean error −\$226.2) … Staten Island \$41.4 |
+| What is the MAE of the current model in New York compared to the baseline? | \$115.08 vs \$164.16 |
+
+Model-related answers differ from the tables above by up to ~2% because the Databricks run uses
+the serverless scikit-learn version (see README). One fix came out of testing: Genie first called
+MAE "median absolute error", so the instructions now say MAE always means the *mean* absolute error.
+Genie also requires every list in the serialized space to be sorted by id — `deploy_genie.py` sorts them.

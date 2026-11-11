@@ -52,6 +52,10 @@ def serialized_space(cfg: dict) -> dict:
             ],
         },
     }
+    # the API requires every list of id-carrying items to be sorted by id
+    space["config"]["sample_questions"].sort(key=lambda x: x["id"])
+    for key in ("text_instructions", "example_question_sqls", "join_specs"):
+        space["instructions"][key].sort(key=lambda x: x["id"])
     return space
 
 

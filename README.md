@@ -101,16 +101,35 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requi
 .venv/bin/python scripts/run_local.py sql "SELECT * FROM spark_catalog.airbnb_gold.model_metrics"
 ```
 
-## Status of the Databricks deployment
+## Running on Databricks — status
 
-While this was built, the team's Free Edition workspace first refused new job runs and SQL warehouse
-starts (compute quota), then reported the organisation as inactive. Therefore:
+Everything was first developed and run locally (`scripts/run_local.py`) while the team's Free
+Edition workspace was out of compute quota and then inactive. Once it was active again, the bundle
+was deployed and **every job ran on Databricks serverless**:
 
-* **All numbers in this repository come from local runs** of the same notebooks
-  (`scripts/run_local.py`, Spark 4.0.1 + Delta 4.0, ANSI mode on, like serverless).
-* The bundle **validates**; a deploy uploaded the files and created the dashboard
-  (`[dev …] Airbnb US Northeast — prices and price model`), but job creation was refused (HTTP 403,
-  organisation inactive). Re-running `databricks bundle deploy` once the workspace is active
-  completes it.
-* The Genie space payload was accepted up to table validation; it can be created as soon as the
-  gold tables exist in Unity Catalog (one run of the jobs above).
+* `airbnb_city_pipeline` for Boston, Jersey City and New York (Inside Airbnb downloaded from inside
+  Databricks into the `airbnb_bronze.raw` volume);
+* `airbnb_train_price_model` for `v1` (week 1), `v2` and the `v2_abc` reference;
+* `airbnb_onboard_city` for New York with `v1` (first run) and `v2`;
+* the AI/BI dashboard is published on the Serverless Starter Warehouse and all three pages were
+  checked in the browser;
+* the Genie space *Airbnb US Northeast — prices and price model (Snusik)* is created (id in
+  [`genie/.space_id`](genie/.space_id)) and answers the example questions correctly
+  ([`docs/genie.md`](docs/genie.md)).
+
+The Databricks runs reproduce the local numbers; the small differences come from the scikit-learn
+version of the serverless environment (and, for `v2`, CV picking the deeper of two variants that
+were within \$0.10 of each other):
+
+| Test MAE, USD | Local | Databricks |
+|---|---:|---:|
+| Baseline, Boston + Jersey City | 124.67 | 124.67 |
+| `v1`, Boston + Jersey City | 73.63 | 73.69 |
+| `v1`, New York (first run) | 143.16 | 144.19 |
+| Baseline, New York | 164.16 | 164.16 |
+| `v2`, Boston + Jersey City | 76.13 | 75.28 |
+| `v2`, New York | 114.70 | 115.08 |
+| `v2_abc` (reference), New York | 87.58 | 87.59 |
+
+The reports, model cards and the presentation quote the local run; the dashboard and Genie show
+the Databricks tables.

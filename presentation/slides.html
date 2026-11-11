@@ -212,7 +212,7 @@
       <ul>
         <li>Serverless notebooks, Spark SQL with ANSI <code>try_cast</code>; shared code in <code>src/airbnb</code>.</li>
         <li>Every step appends row counts and checks to <code>gold.pipeline_runs</code>.</li>
-        <li><b>Free Edition hit its limits</b> during the project (compute quota, then the workspace became inactive). <code>scripts/run_local.py</code> runs the <i>same notebooks</i> on local Spark 4 + Delta; all numbers in this deck come from those runs.</li>
+        <li><b>Free Edition hit its limits</b> during the project (compute quota, then the workspace became inactive). <code>scripts/run_local.py</code> runs the <i>same notebooks</i> on local Spark 4 + Delta; the numbers in this deck come from those runs. Once the workspace was back, every job ran on Databricks and reproduced them within ~1% (NYC: v1 $144.19, v2 $115.08).</li>
       </ul>
     </div>
   </div>

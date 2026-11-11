@@ -44,6 +44,7 @@ instructions: |
   - MAE / accuracy questions: use model_metrics with scope = 'trainable' and split = 'test'.
     city = 'ALL' means Boston and Jersey City together (for v2_abc it also includes New York).
     baseline_mae is the median price for the same room type and number of guests.
+    MAE always means MEAN absolute error (average of abs_error), never "median absolute error".
   - Never show host names together with prices of individual listings unless asked; never use SELECT *.
 
 example_sqls:
