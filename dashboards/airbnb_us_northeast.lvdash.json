@@ -31,7 +31,8 @@
       "name": "neighbourhoods",
       "displayName": "Neighbourhoods",
       "queryLines": [
-        "SELECT city_name, neighbourhood_group, neighbourhood, listings, priced_listings, round(median_price, 0) AS median_price,\n",
+        "SELECT city_name, coalesce(neighbourhood_group, '—') AS neighbourhood_group, neighbourhood, listings, priced_listings,\n",
+        "       round(median_price, 0) AS median_price,\n",
         "       round(median_price_entire_home, 0) AS median_price_entire_home,\n",
         "       round(100 * entire_home_share, 1) AS entire_home_pct, round(avg_review_score, 2) AS avg_review_score,\n",
         "       median_availability_365,\n",
@@ -110,7 +111,8 @@
         "       round(100 * mae_improvement_pct, 1) AS improvement_pct, round(model_median_ae, 1) AS model_median_ae,\n",
         "       round(100 * model_mape, 1) AS model_mape_pct, round(model_bias, 1) AS model_bias\n",
         "FROM workspace.airbnb_gold.model_metrics\n",
-        "WHERE scope = 'trainable' AND split = 'test' AND model_name <> 'baseline'\n"
+        "WHERE scope = 'trainable' AND split = 'test' AND model_name <> 'baseline'\n",
+        "ORDER BY model_version, CASE city WHEN 'boston' THEN 1 WHEN 'jersey-city' THEN 2 WHEN 'ALL' THEN 3 ELSE 4 END\n"
       ]
     },
     {
@@ -170,6 +172,21 @@
         "FROM workspace.airbnb_gold.price_predictions p JOIN workspace.airbnb_gold.listings l USING (city, listing_id)\n",
         "WHERE p.is_trainable AND p.split = 'test') GROUP BY ALL HAVING count(*) >= 10\n"
       ]
+    },
+    {
+      "name": "worst",
+      "displayName": "50 biggest misses per model version",
+      "queryLines": [
+        "SELECT * FROM (\n",
+        "SELECT p.model_version, l.city_name, p.listing_id, p.room_type, p.neighbourhood,\n",
+        "       coalesce(l.neighbourhood_group, l.neighbourhood) AS area, p.accommodates,\n",
+        "       p.actual_price, p.predicted_price, p.baseline_price, p.error, p.abs_error,\n",
+        "       round(100 * p.pct_error, 1) AS pct_error, p.city_role, l.listing_url\n",
+        "FROM workspace.airbnb_gold.price_predictions p JOIN workspace.airbnb_gold.listings l USING (city, listing_id)\n",
+        "WHERE p.is_trainable AND p.split = 'test')\n",
+        "QUALIFY row_number() OVER (PARTITION BY model_version ORDER BY abs_error DESC) <= 50\n",
+        "ORDER BY abs_error DESC\n"
+      ]
     }
   ],
   "pages": [
@@ -192,7 +209,7 @@
             "x": 0,
             "y": 0,
             "width": 6,
-            "height": 2
+            "height": 3
           }
         },
         {
@@ -315,7 +332,7 @@
           },
           "position": {
             "x": 0,
-            "y": 2,
+            "y": 3,
             "width": 2,
             "height": 2
           }
@@ -355,7 +372,7 @@
           },
           "position": {
             "x": 2,
-            "y": 2,
+            "y": 3,
             "width": 1,
             "height": 2
           }
@@ -395,7 +412,7 @@
           },
           "position": {
             "x": 3,
-            "y": 2,
+            "y": 3,
             "width": 1,
             "height": 2
           }
@@ -435,7 +452,7 @@
           },
           "position": {
             "x": 4,
-            "y": 2,
+            "y": 3,
             "width": 1,
             "height": 2
           }
@@ -475,7 +492,7 @@
           },
           "position": {
             "x": 5,
-            "y": 2,
+            "y": 3,
             "width": 1,
             "height": 2
           }
@@ -515,7 +532,7 @@
           },
           "position": {
             "x": 2,
-            "y": 4,
+            "y": 5,
             "width": 1,
             "height": 2
           }
@@ -555,7 +572,7 @@
           },
           "position": {
             "x": 3,
-            "y": 4,
+            "y": 5,
             "width": 1,
             "height": 2
           }
@@ -595,7 +612,7 @@
           },
           "position": {
             "x": 4,
-            "y": 4,
+            "y": 5,
             "width": 1,
             "height": 2
           }
@@ -635,7 +652,7 @@
           },
           "position": {
             "x": 5,
-            "y": 4,
+            "y": 5,
             "width": 1,
             "height": 2
           }
@@ -689,7 +706,7 @@
           },
           "position": {
             "x": 0,
-            "y": 4,
+            "y": 5,
             "width": 2,
             "height": 6
           }
@@ -746,7 +763,7 @@
           },
           "position": {
             "x": 2,
-            "y": 6,
+            "y": 7,
             "width": 4,
             "height": 8
           }
@@ -800,7 +817,7 @@
           },
           "position": {
             "x": 0,
-            "y": 10,
+            "y": 11,
             "width": 2,
             "height": 4
           }
@@ -852,57 +869,41 @@
               }
             ],
             "spec": {
-              "version": 1,
+              "version": 2,
               "widgetType": "table",
               "encodings": {
                 "columns": [
                   {
                     "fieldName": "neighbourhood_group",
-                    "displayName": "Borough / area",
-                    "title": "Borough / area",
-                    "order": 0
+                    "displayName": "Borough / area"
                   },
                   {
                     "fieldName": "neighbourhood",
-                    "displayName": "Neighbourhood",
-                    "title": "Neighbourhood",
-                    "order": 1
+                    "displayName": "Neighbourhood"
                   },
                   {
                     "fieldName": "listings",
-                    "displayName": "Listings",
-                    "title": "Listings",
-                    "order": 2
+                    "displayName": "Listings"
                   },
                   {
                     "fieldName": "median_price",
-                    "displayName": "Median price, $",
-                    "title": "Median price, $",
-                    "order": 3
+                    "displayName": "Median price, $"
                   },
                   {
                     "fieldName": "median_price_entire_home",
-                    "displayName": "Median entire home, $",
-                    "title": "Median entire home, $",
-                    "order": 4
+                    "displayName": "Median entire home, $"
                   },
                   {
                     "fieldName": "entire_home_pct",
-                    "displayName": "Entire homes, %",
-                    "title": "Entire homes, %",
-                    "order": 5
+                    "displayName": "Entire homes, %"
                   },
                   {
                     "fieldName": "avg_review_score",
-                    "displayName": "Avg review score",
-                    "title": "Avg review score",
-                    "order": 6
+                    "displayName": "Avg review score"
                   },
                   {
                     "fieldName": "median_availability_365",
-                    "displayName": "Median days available",
-                    "title": "Median days available",
-                    "order": 7
+                    "displayName": "Median days available"
                   }
                 ]
               },
@@ -914,7 +915,7 @@
           },
           "position": {
             "x": 0,
-            "y": 14,
+            "y": 15,
             "width": 6,
             "height": 7
           }
@@ -940,7 +941,7 @@
             "x": 0,
             "y": 0,
             "width": 6,
-            "height": 2
+            "height": 3
           }
         },
         {
@@ -974,33 +975,25 @@
               }
             ],
             "spec": {
-              "version": 1,
+              "version": 2,
               "widgetType": "table",
               "encodings": {
                 "columns": [
                   {
                     "fieldName": "metric",
-                    "displayName": "Metric",
-                    "title": "Metric",
-                    "order": 0
+                    "displayName": "Metric"
                   },
                   {
                     "fieldName": "boston",
-                    "displayName": "Boston (A)",
-                    "title": "Boston (A)",
-                    "order": 1
+                    "displayName": "Boston (A)"
                   },
                   {
                     "fieldName": "jersey_city",
-                    "displayName": "Jersey City (B)",
-                    "title": "Jersey City (B)",
-                    "order": 2
+                    "displayName": "Jersey City (B)"
                   },
                   {
                     "fieldName": "jc_vs_boston_pct",
-                    "displayName": "Jersey City vs Boston, %",
-                    "title": "Jersey City vs Boston, %",
-                    "order": 3
+                    "displayName": "Jersey City vs Boston, %"
                   }
                 ]
               },
@@ -1012,7 +1005,7 @@
           },
           "position": {
             "x": 0,
-            "y": 2,
+            "y": 3,
             "width": 3,
             "height": 9
           }
@@ -1077,7 +1070,7 @@
           },
           "position": {
             "x": 3,
-            "y": 2,
+            "y": 3,
             "width": 3,
             "height": 5
           }
@@ -1145,7 +1138,7 @@
           },
           "position": {
             "x": 3,
-            "y": 7,
+            "y": 8,
             "width": 3,
             "height": 6
           }
@@ -1210,7 +1203,7 @@
           },
           "position": {
             "x": 0,
-            "y": 11,
+            "y": 12,
             "width": 3,
             "height": 5
           }
@@ -1227,7 +1220,7 @@
             "name": "model_title",
             "multilineTextboxSpec": {
               "lines": [
-                "## 41% better than the baseline at home, but the first New York run under-priced by $128 a night; v2 cuts NYC error from $143 to $115\n",
+                "## 41% better than the baseline at home, but the first New York run under-priced by $129 a night; v2 cuts NYC error from $144 to $115\n",
                 "Test listings only (New York: the same 20% hash split, never trained on). Baseline = median A+B training price for the same room type and guests. v1 = week-1 model; v2 = after the city C changes (market comps, no city-specific features), still trained on Boston + Jersey City; v2_abc = reference retrained with NYC data. Negative error = under-priced: the biggest misses are Manhattan short stays and hotels, and a few luxury homes in Back Bay and Ward D."
               ]
             }
@@ -1236,7 +1229,7 @@
             "x": 0,
             "y": 0,
             "width": 6,
-            "height": 2
+            "height": 3
           }
         },
         {
@@ -1302,7 +1295,7 @@
           },
           "position": {
             "x": 0,
-            "y": 2,
+            "y": 3,
             "width": 2,
             "height": 5
           }
@@ -1358,63 +1351,45 @@
               }
             ],
             "spec": {
-              "version": 1,
+              "version": 2,
               "widgetType": "table",
               "encodings": {
                 "columns": [
                   {
                     "fieldName": "model_label",
-                    "displayName": "Model",
-                    "title": "Model",
-                    "order": 0
+                    "displayName": "Model"
                   },
                   {
                     "fieldName": "city_name",
-                    "displayName": "City",
-                    "title": "City",
-                    "order": 1
+                    "displayName": "City"
                   },
                   {
                     "fieldName": "n",
-                    "displayName": "Test listings",
-                    "title": "Test listings",
-                    "order": 2
+                    "displayName": "Test listings"
                   },
                   {
                     "fieldName": "baseline_mae",
-                    "displayName": "Baseline MAE, $",
-                    "title": "Baseline MAE, $",
-                    "order": 3
+                    "displayName": "Baseline MAE, $"
                   },
                   {
                     "fieldName": "model_mae",
-                    "displayName": "Model MAE, $",
-                    "title": "Model MAE, $",
-                    "order": 4
+                    "displayName": "Model MAE, $"
                   },
                   {
                     "fieldName": "improvement_pct",
-                    "displayName": "Improvement, %",
-                    "title": "Improvement, %",
-                    "order": 5
+                    "displayName": "Improvement, %"
                   },
                   {
                     "fieldName": "model_median_ae",
-                    "displayName": "Median abs. error, $",
-                    "title": "Median abs. error, $",
-                    "order": 6
+                    "displayName": "Median abs. error, $"
                   },
                   {
                     "fieldName": "model_mape_pct",
-                    "displayName": "MAPE, %",
-                    "title": "MAPE, %",
-                    "order": 7
+                    "displayName": "MAPE, %"
                   },
                   {
                     "fieldName": "model_bias",
-                    "displayName": "Mean error (bias), $",
-                    "title": "Mean error (bias), $",
-                    "order": 8
+                    "displayName": "Mean error (bias), $"
                   }
                 ]
               },
@@ -1426,7 +1401,7 @@
           },
           "position": {
             "x": 2,
-            "y": 2,
+            "y": 3,
             "width": 4,
             "height": 5
           }
@@ -1485,6 +1460,23 @@
                     }
                   ]
                 }
+              },
+              {
+                "name": "f_version_filter_worst",
+                "query": {
+                  "datasetName": "worst",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "model_version",
+                      "expression": "`model_version`"
+                    },
+                    {
+                      "name": "model_version_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ]
+                }
               }
             ],
             "spec": {
@@ -1506,6 +1498,11 @@
                     "fieldName": "model_version",
                     "displayName": "Model version (charts below)",
                     "queryName": "f_version_filter_error_by_neighbourhood"
+                  },
+                  {
+                    "fieldName": "model_version",
+                    "displayName": "Model version (charts below)",
+                    "queryName": "f_version_filter_worst"
                   }
                 ]
               },
@@ -1529,7 +1526,7 @@
           },
           "position": {
             "x": 0,
-            "y": 7,
+            "y": 8,
             "width": 2,
             "height": 2
           }
@@ -1594,7 +1591,7 @@
           },
           "position": {
             "x": 0,
-            "y": 9,
+            "y": 10,
             "width": 3,
             "height": 7
           }
@@ -1662,7 +1659,7 @@
           },
           "position": {
             "x": 3,
-            "y": 9,
+            "y": 10,
             "width": 3,
             "height": 7
           }
@@ -1730,7 +1727,7 @@
           },
           "position": {
             "x": 0,
-            "y": 16,
+            "y": 17,
             "width": 6,
             "height": 8
           }
@@ -1742,7 +1739,7 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "predictions",
+                  "datasetName": "worst",
                   "disaggregated": true,
                   "fields": [
                     {
@@ -1790,81 +1787,61 @@
               }
             ],
             "spec": {
-              "version": 1,
+              "version": 2,
               "widgetType": "table",
               "encodings": {
                 "columns": [
                   {
                     "fieldName": "city_name",
-                    "displayName": "City",
-                    "title": "City",
-                    "order": 0
+                    "displayName": "City"
                   },
                   {
                     "fieldName": "listing_id",
-                    "displayName": "Listing",
-                    "title": "Listing",
-                    "order": 1
+                    "displayName": "Listing"
                   },
                   {
                     "fieldName": "room_type",
-                    "displayName": "Room type",
-                    "title": "Room type",
-                    "order": 2
+                    "displayName": "Room type"
                   },
                   {
                     "fieldName": "neighbourhood",
-                    "displayName": "Neighbourhood",
-                    "title": "Neighbourhood",
-                    "order": 3
+                    "displayName": "Neighbourhood"
                   },
                   {
                     "fieldName": "accommodates",
-                    "displayName": "Guests",
-                    "title": "Guests",
-                    "order": 4
+                    "displayName": "Guests"
                   },
                   {
                     "fieldName": "actual_price",
-                    "displayName": "Actual, $",
-                    "title": "Actual, $",
-                    "order": 5
+                    "displayName": "Actual, $"
                   },
                   {
                     "fieldName": "predicted_price",
-                    "displayName": "Predicted, $",
-                    "title": "Predicted, $",
-                    "order": 6
+                    "displayName": "Predicted, $"
                   },
                   {
                     "fieldName": "error",
-                    "displayName": "Error, $",
-                    "title": "Error, $",
-                    "order": 7
+                    "displayName": "Error, $"
                   },
                   {
                     "fieldName": "pct_error",
-                    "displayName": "Error, %",
-                    "title": "Error, %",
-                    "order": 8
+                    "displayName": "Error, %"
                   },
                   {
                     "fieldName": "listing_url",
-                    "displayName": "URL",
-                    "title": "URL",
-                    "order": 9
+                    "displayName": "URL"
                   }
                 ]
               },
               "frame": {
                 "showTitle": true,
-                "title": "Listings the model mis-prices most (sort by Error: lowest = under-priced, highest = over-priced)"
+                "title": "The 50 listings the model mis-prices most (negative error = under-priced)"
               }
             }
           },
           "position": {
             "x": 0,
-            "y": 24,
+            "y": 25,
             "width": 6,
             "height": 8
           }

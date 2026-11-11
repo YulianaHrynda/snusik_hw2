@@ -20,7 +20,7 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "airbnb_us_northe
 TITLES = {
     "overview": "Boston has the priciest typical night ($253 median); New York is a monthly-rental market (81% of listings need 30+ nights)",
     "compare": "An entire home costs the same in both cities (~$300); Jersey City is cheaper only for private rooms (−32%) and small units",
-    "model": "41% better than the baseline at home, but the first New York run under-priced by $128 a night; v2 cuts NYC error from $143 to $115",
+    "model": "41% better than the baseline at home, but the first New York run under-priced by $129 a night; v2 cuts NYC error from $144 to $115",
 }
 SUBTITLES = {
     "overview": "Pick a city. Location drives price inside a city (Boston: Longwood, North End and Downtown ~$360+, East Boston ~$220). "
@@ -54,7 +54,8 @@ SELECT city_name, room_type, count(*) AS listings,
 FROM {GOLD}.listings
 GROUP BY city_name, room_type"""),
     "neighbourhoods": ("Neighbourhoods", f"""
-SELECT city_name, neighbourhood_group, neighbourhood, listings, priced_listings, round(median_price, 0) AS median_price,
+SELECT city_name, coalesce(neighbourhood_group, '—') AS neighbourhood_group, neighbourhood, listings, priced_listings,
+       round(median_price, 0) AS median_price,
        round(median_price_entire_home, 0) AS median_price_entire_home,
        round(100 * entire_home_share, 1) AS entire_home_pct, round(avg_review_score, 2) AS avg_review_score,
        median_availability_365,
@@ -108,7 +109,8 @@ SELECT model_version,
        round(100 * mae_improvement_pct, 1) AS improvement_pct, round(model_median_ae, 1) AS model_median_ae,
        round(100 * model_mape, 1) AS model_mape_pct, round(model_bias, 1) AS model_bias
 FROM {GOLD}.model_metrics
-WHERE scope = 'trainable' AND split = 'test' AND model_name <> 'baseline'"""),
+WHERE scope = 'trainable' AND split = 'test' AND model_name <> 'baseline'
+ORDER BY model_version, CASE city WHEN 'boston' THEN 1 WHEN 'jersey-city' THEN 2 WHEN 'ALL' THEN 3 ELSE 4 END"""),
     "mae_by_version": ("MAE by version", f"""
 SELECT CASE city WHEN 'ALL' THEN 'Boston + Jersey City' ELSE 'New York City' END AS evaluated_on,
        'baseline' AS series, round(baseline_mae, 1) AS mae
@@ -136,6 +138,10 @@ SELECT model_version, city_name, area, concat(city_name, ' · ', area) AS city_a
        round(avg(abs_error), 1) AS model_mae
 FROM ({predictions}) GROUP BY ALL HAVING count(*) >= 10"""),
 }
+DATASETS["worst"] = ("50 biggest misses per model version", """
+SELECT * FROM ({predictions})
+QUALIFY row_number() OVER (PARTITION BY model_version ORDER BY abs_error DESC) <= 50
+ORDER BY abs_error DESC""".format(predictions=DATASETS["predictions"][1]))
 DATASETS["error_by_room"] = (DATASETS["error_by_room"][0], DATASETS["error_by_room"][1].format(predictions=DATASETS["predictions"][1]))
 DATASETS["error_by_neighbourhood"] = (DATASETS["error_by_neighbourhood"][0],
                                       DATASETS["error_by_neighbourhood"][1].format(predictions=DATASETS["predictions"][1]))
@@ -189,9 +195,10 @@ def chart(name, kind, dataset, x, y, title, pos, color=None, x_type="categorical
 
 
 def table(name, dataset, columns, title, pos, description=""):
-    cols = [{"fieldName": c, "displayName": label, "title": label, "order": i} for i, (c, label) in enumerate(columns)]
+    # table spec v2 (the v1 column format is rejected as "invalid widget definition")
+    cols = [{"fieldName": c, "displayName": label} for c, label in columns]
     return {"widget": {"name": name, "queries": [_q(dataset, [(c, f"`{c}`") for c, _ in columns])],
-                       "spec": {"version": 1, "widgetType": "table", "encodings": {"columns": cols},
+                       "spec": {"version": 2, "widgetType": "table", "encodings": {"columns": cols},
                                 "frame": _frame(title, description)}},
             "position": _pos(*pos)}
 
@@ -208,16 +215,22 @@ def single_filter(name, datasets, field, title, pos, default=None):
 
 
 def page(name, layout):
+    for item in layout:  # widgets were laid out under a 2-row header
+        if not item["widget"]["name"].endswith("_title"):
+            item["position"]["y"] += HEADER_HEIGHT - 2
     return {"name": name, "displayName": {"overview": "City overview", "compare": "Cross-city comparison",
                                           "model": "Model"}[name],
             "pageType": "PAGE_TYPE_CANVAS", "layout": layout}
+
+
+HEADER_HEIGHT = 3
 
 
 def header(key):
     lines = [f"## {TITLES[key]}\n"]
     if SUBTITLES[key]:
         lines.append(SUBTITLES[key])
-    return text(f"{key}_title", lines, (0, 0, 6, 2))
+    return text(f"{key}_title", lines, (0, 0, 6, HEADER_HEIGHT))
 
 
 # ----------------------------------------------------------------------------- pages
@@ -274,7 +287,7 @@ model = page("model", [
            ("model_mae", "Model MAE, $"), ("improvement_pct", "Improvement, %"), ("model_median_ae", "Median abs. error, $"),
            ("model_mape_pct", "MAPE, %"), ("model_bias", "Mean error (bias), $")],
           "Test-set error by model version and city", (2, 2, 4, 5)),
-    single_filter("version_filter", ["predictions", "error_by_room", "error_by_neighbourhood"],
+    single_filter("version_filter", ["predictions", "error_by_room", "error_by_neighbourhood", "worst"],
                   "model_version", "Model version (charts below)", (0, 7, 2, 2), default="v2"),
     chart("pred_scatter", "scatter", "predictions", "actual_price", "predicted_price",
           "Predicted vs actual price (test listings)", (0, 9, 3, 7), color="city_name", x_type="quantitative",
@@ -286,11 +299,11 @@ model = page("model", [
           "Mean error by area — neighbourhood (Boston, Jersey City) or borough (New York); negative = under-priced",
           (0, 16, 6, 8), x_type="quantitative", y_type="categorical", sort=("y", "x"), color="city_name",
           labels={"mean_error": "Mean error, $", "city_area": "Area", "city_name": "City"}),
-    table("worst_table", "predictions",
+    table("worst_table", "worst",
           [("city_name", "City"), ("listing_id", "Listing"), ("room_type", "Room type"), ("neighbourhood", "Neighbourhood"),
            ("accommodates", "Guests"), ("actual_price", "Actual, $"), ("predicted_price", "Predicted, $"),
            ("error", "Error, $"), ("pct_error", "Error, %"), ("listing_url", "URL")],
-          "Listings the model mis-prices most (sort by Error: lowest = under-priced, highest = over-priced)", (0, 24, 6, 8)),
+          "The 50 listings the model mis-prices most (negative error = under-priced)", (0, 24, 6, 8)),
 ])
 
 
