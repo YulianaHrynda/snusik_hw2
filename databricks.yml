@@ -12,6 +12,10 @@ variables:
   catalog:
     description: Unity Catalog catalog that holds the airbnb_{bronze,silver,gold} schemas
     default: workspace
+  warehouse_id:
+    description: SQL warehouse used by the AI/BI dashboard
+    lookup:
+      warehouse: "Serverless Starter Warehouse"
 
 include:
   - resources/*.yml
