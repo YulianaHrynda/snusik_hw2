@@ -27,7 +27,6 @@ from airbnb.config import is_databricks, lakehouse_from, parse_city_list, read_p
 from airbnb.modelling import (FEATURE_SETS, RANDOM_STATE, MedianBaseline, add_comps, metrics_rows,
                               prediction_frame, prepare, save_artifact)
 
-# feature_set: "v1" = the original week-1 model, "comps" = v2 (after city C, see docs/city_c_report.md)
 params = read_params(dbutils, train_cities='["boston", "jersey-city"]', model_version="v2", feature_set="comps",
                      model_name="auto", overwrite="false", catalog="workspace", raw_root="", artifacts_root="")
 lh = lakehouse_from(params)
@@ -47,7 +46,7 @@ if missing_cities:
 
 data = prepare(pdf)
 if fs["comps"]:
-    data = add_comps(data)  # comps from each city's own training split, never the listing itself or its host
+    data = add_comps(data)
 trainable = data[data["is_trainable"].astype(bool)]
 train = trainable[trainable["split"] == "train"].reset_index(drop=True)
 test = trainable[trainable["split"] == "test"].reset_index(drop=True)
@@ -97,7 +96,6 @@ rows = []
 for split in ("test", "train"):
     part = scored[(scored["split"] == split) & scored["is_trainable"].astype(bool)]
     rows += metrics_rows(part, version, model_name, split, "trainable")
-# robustness: the same test listings plus the implausible prices that the main metric excludes
 priced_test = scored[(scored["split"] == "test") & scored["actual_price"].notna()]
 rows += metrics_rows(priced_test, version, model_name, "test", "all_priced")
 metrics = pd.DataFrame(rows)
@@ -157,7 +155,7 @@ print(f"{pred_table}: {len(preds)} rows | {metric_table}: {len(metrics)} rows")
 
 # COMMAND ----------
 
-if is_databricks():  # experiment tracking + Unity Catalog registry (best effort, the joblib above is the source of truth)
+if is_databricks():
     try:
         import mlflow
         from mlflow.models import infer_signature
@@ -174,7 +172,7 @@ if is_databricks():  # experiment tracking + Unity Catalog registry (best effort
             mlflow.sklearn.log_model(model, "model", input_example=sample.head(5),
                                      signature=infer_signature(sample, model.predict(sample)),
                                      registered_model_name=f"{lh.schema('gold')}.price_model")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print("MLflow logging skipped:", repr(exc))
 
 # COMMAND ----------

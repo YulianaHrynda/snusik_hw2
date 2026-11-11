@@ -1,11 +1,4 @@
 #!/usr/bin/env python
-"""Generate the AI/BI (Lakeview) dashboard definition from readable Python.
-
-    python dashboards/build_dashboard.py            # writes dashboards/airbnb_us_northeast.lvdash.json
-
-The bundle deploys the generated JSON (resources/dashboard.yml). Page titles state the finding
-of each page; the numbers in them come from the gold tables (see the README).
-"""
 from __future__ import annotations
 
 import json
@@ -16,7 +9,6 @@ GOLD = f"{CATALOG}.airbnb_gold"
 TRAIN_CITIES = "('boston', 'jersey-city')"
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "airbnb_us_northeast.lvdash.json")
 
-# ----------------------------------------------------------------------------- page titles (findings)
 TITLES = {
     "overview": "Boston has the priciest typical night ($253 median); New York is a monthly-rental market (81% of listings need 30+ nights)",
     "compare": "An entire home costs the same in both cities (~$300); Jersey City is cheaper only for private rooms (−32%) and small units",
@@ -34,7 +26,6 @@ SUBTITLES = {
              "misses are Manhattan short stays and hotels, and a few luxury homes in Back Bay and Ward D.",
 }
 
-# ----------------------------------------------------------------------------- datasets
 DATASETS = {
     "city_metrics": ("City metrics", f"""
 SELECT city, city_name, snapshot_date, listings, priced_listings, hosts, neighbourhoods,
@@ -147,7 +138,6 @@ DATASETS["error_by_neighbourhood"] = (DATASETS["error_by_neighbourhood"][0],
                                       DATASETS["error_by_neighbourhood"][1].format(predictions=DATASETS["predictions"][1]))
 
 
-# ----------------------------------------------------------------------------- widget helpers
 def _q(dataset: str, fields: list[tuple[str, str]], disaggregated: bool = True, name: str = "main_query") -> dict:
     return {"name": name, "query": {"datasetName": dataset, "disaggregated": disaggregated,
                                     "fields": [{"name": n, "expression": e} for n, e in fields]}}
@@ -195,7 +185,6 @@ def chart(name, kind, dataset, x, y, title, pos, color=None, x_type="categorical
 
 
 def table(name, dataset, columns, title, pos, description=""):
-    # table spec v2 (the v1 column format is rejected as "invalid widget definition")
     cols = [{"fieldName": c, "displayName": label} for c, label in columns]
     return {"widget": {"name": name, "queries": [_q(dataset, [(c, f"`{c}`") for c, _ in columns])],
                        "spec": {"version": 2, "widgetType": "table", "encodings": {"columns": cols},
@@ -215,7 +204,7 @@ def single_filter(name, datasets, field, title, pos, default=None):
 
 
 def page(name, layout):
-    for item in layout:  # widgets were laid out under a 2-row header
+    for item in layout:
         if not item["widget"]["name"].endswith("_title"):
             item["position"]["y"] += HEADER_HEIGHT - 2
     return {"name": name, "displayName": {"overview": "City overview", "compare": "Cross-city comparison",
@@ -233,7 +222,6 @@ def header(key):
     return text(f"{key}_title", lines, (0, 0, 6, HEADER_HEIGHT))
 
 
-# ----------------------------------------------------------------------------- pages
 overview = page("overview", [
     header("overview"),
     single_filter("city_filter", ["city_metrics", "room_mix", "neighbourhoods", "top_neighbourhoods"], "city_name", "City",

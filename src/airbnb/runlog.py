@@ -1,4 +1,3 @@
-"""Append-only audit trail of what every layer read and wrote (gold.pipeline_runs)."""
 from __future__ import annotations
 
 import json

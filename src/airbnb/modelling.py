@@ -1,4 +1,3 @@
-"""Price model: features, baseline, candidate models, metrics and artifact storage."""
 from __future__ import annotations
 
 import json
@@ -34,9 +33,7 @@ TARGET = "price"
 RANDOM_STATE = 42
 
 
-# ----------------------------------------------------------------------------- data
 def prepare(pdf: pd.DataFrame) -> pd.DataFrame:
-    """Give every feature a model-friendly dtype (Spark booleans with NULLs arrive as objects)."""
     out = pdf.copy()
     for c in BOOLEAN:
         out[c] = out[c].map({True: 1.0, False: 0.0}).astype("float64")
@@ -47,12 +44,7 @@ def prepare(pdf: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-# ----------------------------------------------------------------------------- baseline
 class MedianBaseline:
-    """Median training price for the same (room_type, accommodates).
-
-    Unseen combinations fall back to the room-type median, then to the global median.
-    """
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> "MedianBaseline":
         d = X[["room_type", "accommodates"]].assign(y=y.values)
@@ -74,7 +66,6 @@ class MedianBaseline:
         )
 
 
-# ----------------------------------------------------------------------------- models
 def _onehot() -> OneHotEncoder:
     return OneHotEncoder(handle_unknown="infrequent_if_exist", min_frequency=10, sparse_output=False)
 
@@ -91,7 +82,6 @@ def make_ridge(alpha: float = 3.0):
 
 def make_hgb(loss: str = "squared_error", max_iter: int = 400, max_leaf_nodes: int = 31,
              learning_rate: float = 0.05, min_samples_leaf: int = 20):
-    """Gradient-boosted trees on log price. NaNs are handled natively (no imputation)."""
     pre = ColumnTransformer([("cat", _onehot(), CATEGORICAL), ("num", "passthrough", NUMERIC + BOOLEAN)])
     hgb = HistGradientBoostingRegressor(
         loss=loss, max_iter=max_iter, max_leaf_nodes=max_leaf_nodes, learning_rate=learning_rate,
@@ -110,16 +100,8 @@ CANDIDATES = {
 }
 
 
-# ----------------------------------------------------------------------------- v2: market comps
-# Model change after city C (docs/city_c_report.md). v1 learned Boston/Jersey City location and
-# price *levels* (city, neighbourhood names, raw coordinates); none of that transfers. v2 drops
-# those features and anchors every prediction on comparable listings of the *same* city:
-#   prediction = comp_price_seg * exp(model(features))
-# so the price level comes from the local market and the model only learns relative adjustments.
-# Comps come from the city's training-split listings with a valid price, never from the listing
-# itself or from other listings of the same host.
-COMP_K_SEGMENT = 20     # nearest listings of the same room type and stay type
-COMP_K_LOCAL = 50       # nearest listings of any type (local market level)
+COMP_K_SEGMENT = 20
+COMP_K_LOCAL = 50
 EARTH_RADIUS_KM = 6371.0088
 ANCHOR = "comp_price_seg"
 COMP_FEATURES = ["comp_log_price_seg", "comp_log_price_local", "comp_accommodates_seg", "comp_radius_km_seg",
@@ -147,7 +129,7 @@ def _knn_comps(rows: pd.DataFrame, ref: pd.DataFrame, k: int, extra: int = 100) 
     ok = ((ref["listing_id"].to_numpy()[idx] != rows["listing_id"].to_numpy()[has_xy][:, None])
           & (ref["host_id"].to_numpy()[idx] != rows["host_id"].to_numpy()[has_xy][:, None]))
     keep = ok & (np.cumsum(ok, axis=1) <= k)
-    with warnings.catch_warnings():  # rows without any usable comp stay NaN and get a fallback
+    with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
         out["price"][has_xy] = np.nanmedian(np.where(keep, ref["price"].to_numpy(dtype=float)[idx], np.nan), axis=1)
         out["acc"][has_xy] = np.nanmedian(np.where(keep, ref["accommodates"].to_numpy(dtype=float)[idx], np.nan), axis=1)
@@ -156,7 +138,6 @@ def _knn_comps(rows: pd.DataFrame, ref: pd.DataFrame, k: int, extra: int = 100) 
 
 
 def add_comps(df: pd.DataFrame) -> pd.DataFrame:
-    """Add market-comp features per city (expects prepared data with split/is_trainable/host_id)."""
     out = df.copy()
     out["segment"] = segment(out)
     for c in (ANCHOR, "comp_price_local", "comp_accommodates_seg", "comp_radius_km_seg"):
@@ -175,7 +156,6 @@ def add_comps(df: pd.DataFrame) -> pd.DataFrame:
             out.loc[ds.index, ANCHOR] = r["price"]
             out.loc[ds.index, "comp_accommodates_seg"] = r["acc"]
             out.loc[ds.index, "comp_radius_km_seg"] = r["radius"]
-        # fallbacks for rows without a usable comp: segment median, then city median
         rows = out.index.isin(d.index)
         seg_median = ref_city.groupby("segment")["price"].median()
         city_median = ref_city["price"].median()
@@ -192,7 +172,6 @@ def add_comps(df: pd.DataFrame) -> pd.DataFrame:
 
 
 class CompsResidualModel(BaseEstimator, RegressorMixin):
-    """Fits log(price) - log(anchor); predicts anchor * exp(prediction)."""
 
     def __init__(self, inner=None, anchor: str = ANCHOR):
         self.inner = inner
@@ -237,7 +216,6 @@ FEATURE_SETS = {
 }
 
 
-# ----------------------------------------------------------------------------- metrics
 def error_metrics(y_true, y_pred, prefix: str) -> dict:
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
@@ -250,13 +228,12 @@ def error_metrics(y_true, y_pred, prefix: str) -> dict:
         f"{prefix}_median_ae": float(np.median(ae)),
         f"{prefix}_mape": float(np.mean(ae / y_true)),
         f"{prefix}_within_25pct": float(np.mean(ae / y_true <= 0.25)),
-        f"{prefix}_bias": float(np.mean(y_pred - y_true)),  # > 0: over-pricing on average
+        f"{prefix}_bias": float(np.mean(y_pred - y_true)),
     }
 
 
 def metrics_rows(df: pd.DataFrame, model_version: str, model_name: str, split: str, scope: str,
                  group_cols=("city",)) -> list[dict]:
-    """Model vs baseline metrics per city and for all cities together."""
     rows = []
     groups = [(g, d) for g, d in df.groupby(list(group_cols))] + [(("ALL",), df)]
     for key, d in groups:
@@ -273,7 +250,6 @@ def metrics_rows(df: pd.DataFrame, model_version: str, model_name: str, split: s
     return rows
 
 
-# ----------------------------------------------------------------------------- artifacts
 def model_dir(artifacts_root: str, version: str) -> str:
     return os.path.join(artifacts_root, "models", version)
 
@@ -307,20 +283,14 @@ def prediction_frame(pdf: pd.DataFrame, pred: np.ndarray, base: np.ndarray, mode
     out["city_role"] = out["city"].map(city_role).fillna("new")
     out["predicted_price"] = np.round(pred, 2)
     out["baseline_price"] = np.round(base, 2)
-    out["error"] = out["predicted_price"] - out["actual_price"]  # > 0: model over-prices
+    out["error"] = out["predicted_price"] - out["actual_price"]
     out["abs_error"] = out["error"].abs()
     out["pct_error"] = out["error"] / out["actual_price"]
     out["predicted_at"] = pd.Timestamp.now(tz="UTC").tz_localize(None)
     return out
 
 
-# ----------------------------------------------------------------------------- drift
 def drift_report(train: pd.DataFrame, new: pd.DataFrame, features: list[str]) -> dict:
-    """How much of a new city's input the model has never seen.
-
-    Categorical: share of rows whose level does not occur in training.
-    Numeric: share of rows outside the training [min, max].
-    """
     report = {}
     for c in features:
         if c not in new.columns or c not in train.columns:

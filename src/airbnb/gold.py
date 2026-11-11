@@ -1,14 +1,11 @@
-"""Gold: consumption tables built from silver for one city."""
 from __future__ import annotations
 
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
-# Share of listings per city that goes to the test set. Decided before any model was trained.
 TEST_PERCENT = 20
 SPLIT_EXPR = f"CASE WHEN pmod(xxhash64(CAST(listing_id AS STRING)), 100) < {TEST_PERCENT} THEN 'test' ELSE 'train' END"
 
-# Amenity flags used as features (case-insensitive regex on each amenity string)
 AMENITY_FLAGS = {
     "has_air_conditioning": r"air conditioning|\bac\b",
     "has_pool": r"^(private |shared )?(indoor |outdoor )?pool( -|$)",
@@ -32,7 +29,6 @@ def _amenity_expr(pattern: str) -> str:
 
 
 def build_listings(silver: DataFrame, city_name: str) -> DataFrame:
-    """Curated listing-level table for the dashboard and Genie (no free text, no leak columns)."""
     return silver.select(
         "listing_id", "city", F.lit(city_name).alias("city_name"), "snapshot_date", "name", "listing_url",
         "neighbourhood_group", "neighbourhood", "latitude", "longitude", "room_type", "property_type",
@@ -100,10 +96,9 @@ def build_neighbourhood_metrics(silver: DataFrame, city_name: str) -> DataFrame:
 
 
 def build_listing_features(silver: DataFrame) -> DataFrame:
-    """Model-ready features, the label and the fixed train/test split."""
     amenity_cols = [F.expr(_amenity_expr(p)).alias(name) for name, p in AMENITY_FLAGS.items()]
     return silver.select(
-        "listing_id", "city", "snapshot_date", "host_id",  # host_id: comps exclude the host's own listings
+        "listing_id", "city", "snapshot_date", "host_id",
         F.expr(SPLIT_EXPR).alias("split"),
         "price", "price_class",
         F.col("has_valid_price").alias("is_trainable"),

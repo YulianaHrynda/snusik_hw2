@@ -1,4 +1,3 @@
-# One pipeline, the city is a parameter. Every city runs exactly this job.
 resources:
   jobs:
     airbnb_city_pipeline:
@@ -9,7 +8,7 @@ resources:
         - name: city
           default: boston
         - name: snapshot_date
-          default: ""   # empty = the snapshot pinned in cities.json
+          default: ""
         - name: catalog
           default: ${var.catalog}
       tasks:

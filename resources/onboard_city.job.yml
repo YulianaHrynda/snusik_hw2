@@ -1,4 +1,3 @@
-# A new client city: run the unchanged city pipeline, then score it with an existing model version.
 resources:
   jobs:
     airbnb_onboard_city:

@@ -39,10 +39,9 @@ pdf = spark.table(lh.table("gold", "listing_features")).where(f"city = '{city}'"
 if pdf.empty:
     raise ValueError(f"no gold features for city '{city}'; run airbnb_city_pipeline first")
 data = prepare(pdf)
-if uses_comps:  # market comps from this city's own training-split listings (not the listing, not its host)
+if uses_comps:
     data = add_comps(data)
 
-# Input drift against the model's training rows: unseen categories, numbers outside the training range
 train_list = ", ".join(f"'{c}'" for c in artifact["train_cities"])
 train_rows = prepare(spark.table(lh.table("gold", "listing_features"))
                      .where(f"city IN ({train_list}) AND split = 'train' AND is_trainable").toPandas())
@@ -69,9 +68,8 @@ rows += metrics_rows(trainable[trainable["split"] == "test"], version, artifact[
 if role == "new":
     rows += metrics_rows(trainable, version, artifact["model_name"], "all", "trainable")
     rows += metrics_rows(scored[scored["actual_price"].notna()], version, artifact["model_name"], "all", "all_priced")
-rows = [r for r in rows if r["city"] != "ALL"]  # a single city: the ALL row duplicates it
+rows = [r for r in rows if r["city"] != "ALL"]
 if role == "new":
-    # reference only: the same baseline rule fitted on the new city's own training split
     own = data[data["is_trainable"].astype(bool) & data["split"].eq("train")]
     local_base = pd.Series(MedianBaseline().fit(own, own["price"]).predict(data), index=preds.index)
     for r in rows:

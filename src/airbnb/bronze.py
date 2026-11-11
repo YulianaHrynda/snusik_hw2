@@ -1,4 +1,3 @@
-"""Bronze: land the raw file and load it as-is (every column a string) with lineage columns."""
 from __future__ import annotations
 
 import os
@@ -19,11 +18,6 @@ def landing_file(lh: Lakehouse, city: City) -> str:
 
 
 def ensure_raw_file(lh: Lakehouse, city: City) -> tuple[str, bool]:
-    """Download the snapshot into the landing zone unless it is already there.
-
-    Returns (path, downloaded_now). The file is first written to local temp storage and then
-    copied, so a failed download never leaves a truncated file in the landing zone.
-    """
     target = landing_file(lh, city)
     if os.path.exists(target) and os.path.getsize(target) > 0:
         return target, False
@@ -38,7 +32,7 @@ def ensure_raw_file(lh: Lakehouse, city: City) -> tuple[str, bool]:
             if f.read(2) != GZIP_MAGIC:
                 raise ValueError("downloaded file is not gzip")
         shutil.copyfile(tmp, target)
-    except Exception as exc:  # noqa: BLE001 - re-raised with an actionable message
+    except Exception as exc:
         raise RuntimeError(
             f"Could not download {city.url} ({exc!r}). If this compute has no internet access, "
             f"upload the file with: scripts/upload_raw.sh {city.key}"
@@ -49,11 +43,6 @@ def ensure_raw_file(lh: Lakehouse, city: City) -> tuple[str, bool]:
 
 
 def read_listings_csv(spark: SparkSession, path: str) -> DataFrame:
-    """Read an Inside Airbnb listings file without typing anything.
-
-    multiLine + '"' escaping are required: descriptions contain line breaks and some cells hold
-    JSON with doubled quotes.
-    """
     return (
         spark.read.option("header", True)
         .option("multiLine", True)

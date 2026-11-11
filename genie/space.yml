@@ -1,4 +1,3 @@
-# Genie space over the gold tables. Applied with:  python genie/deploy_genie.py
 title: "Airbnb US Northeast — prices and price model (Snusik)"
 description: >
   Ask about Airbnb listings, prices, neighbourhoods and hosts in Boston (city A), Jersey City

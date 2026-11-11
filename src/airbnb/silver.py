@@ -1,12 +1,9 @@
-"""Silver: typed, cleaned, de-duplicated listings (rules from the EDA notebook, section 6)."""
 from __future__ import annotations
 
 from pyspark.sql import DataFrame, Window
 from pyspark.sql import functions as F
 
-# Outlier rule from the EDA (section 5): a price per guest at or above this is not a market price.
 IMPLAUSIBLE_PRICE_PER_GUEST = 750.0
-# Listings that cannot be booked for less than this many nights are monthly rentals (EDA 4.2).
 MONTHLY_MIN_NIGHTS = 28
 
 
@@ -15,7 +12,6 @@ def _bool(col: str) -> str:
 
 
 def _int(col: str, alias: str | None = None) -> str:
-    # via DOUBLE: under ANSI mode try_cast('1.0' AS INT) is NULL, and some files write '1.0'
     return f"try_cast(try_cast(`{col}` AS DOUBLE) AS INT) AS {alias or col}"
 
 
@@ -35,8 +31,6 @@ REVIEW_SCORES = [
     "review_scores_value",
 ]
 
-# Columns deliberately NOT carried into silver (EDA section 7): price_quote_* and
-# estimated_revenue_l365d are computed from the price; the 14 always-empty columns; URLs/images.
 SILVER_SELECT = [
     "try_cast(id AS BIGINT) AS listing_id",
     "city",
@@ -53,7 +47,7 @@ SILVER_SELECT = [
     _double("hosts_time_as_host_years", "host_years"),
     _int("calculated_host_listings_count", "host_listings_count"),
     "neighbourhood_cleansed AS neighbourhood",
-    "nullif(trim(neighbourhood_group_cleansed), '') AS neighbourhood_group",  # e.g. NYC borough; empty in A/B
+    "nullif(trim(neighbourhood_group_cleansed), '') AS neighbourhood_group",
     _double("latitude"),
     _double("longitude"),
     "property_type",
@@ -82,11 +76,8 @@ SILVER_SELECT = [
     "license",
 ]
 
-# Source columns the pipeline cannot work without; any other column it reads is optional and is
-# added as NULL (with a warning) when a city's file does not have it.
 REQUIRED_COLUMNS = ["id", "price", "room_type", "accommodates", "latitude", "longitude", "neighbourhood_cleansed"]
 
-# Expected ranges, from Boston and Jersey City. Outside them the run continues but logs a warning.
 PROFILE_LIMITS = {
     "missing_price_share": 0.25,
     "implausible_share": 0.002,
@@ -94,7 +85,6 @@ PROFILE_LIMITS = {
     "stale_share": 0.25,
 }
 
-# raw column -> silver column, checked for values that were present but failed to parse
 PARSE_CHECKS = {
     "id": "listing_id", "price": "price", "accommodates": "accommodates", "bedrooms": "bedrooms",
     "beds": "beds", "latitude": "latitude", "longitude": "longitude",
@@ -104,7 +94,6 @@ PARSE_CHECKS = {
 }
 
 
-# Every raw column SILVER_SELECT reads.
 SOURCE_COLUMNS = [
     "id", "last_scraped", "source", "listing_url", "name", "host_id", "host_name", "host_is_superhost",
     "host_identity_verified", "host_has_profile_pic", "hosts_time_as_host_years", "calculated_host_listings_count",
@@ -117,7 +106,6 @@ SOURCE_COLUMNS = [
 
 
 def align_schema(bronze: DataFrame) -> tuple[DataFrame, list[str]]:
-    """Fail on missing required columns; add missing optional ones as NULL and report them."""
     present = set(bronze.columns)
     missing_required = [c for c in REQUIRED_COLUMNS if c not in present]
     if missing_required:
@@ -133,7 +121,6 @@ def type_and_clean(bronze: DataFrame) -> DataFrame:
 
 
 def profile(silver: DataFrame) -> tuple[dict, list[str]]:
-    """Shares that describe the market and the target; warnings when outside PROFILE_LIMITS."""
     row = silver.agg(
         F.avg(F.expr("CAST(price_class = 'missing' AS DOUBLE)")).alias("missing_price_share"),
         F.avg(F.expr("CAST(price_class = 'implausible' AS DOUBLE)")).alias("implausible_share"),
@@ -148,21 +135,18 @@ def profile(silver: DataFrame) -> tuple[dict, list[str]]:
 
 
 def parse_report(bronze: DataFrame, typed: DataFrame) -> dict:
-    """Count values that were non-null in bronze but null after typing (silent parse failures)."""
     raw_counts = bronze.agg(*[F.count(F.col(f"`{r}`")).alias(r) for r in PARSE_CHECKS]).first().asDict()
     typed_counts = typed.agg(*[F.count(F.col(s)).alias(s) for s in PARSE_CHECKS.values()]).first().asDict()
     return {r: int(raw_counts[r] - typed_counts[s]) for r, s in PARSE_CHECKS.items()}
 
 
 def deduplicate(df: DataFrame) -> DataFrame:
-    """One row per listing: keep the most recently scraped, non-stale record."""
     w = Window.partitionBy("listing_id").orderBy(F.col("last_scraped").desc_nulls_last(), F.col("is_stale").asc())
     return df.withColumn("_rn", F.row_number().over(w)).where("_rn = 1").drop("_rn")
 
 
 def add_flags(df: DataFrame) -> DataFrame:
-    """Derived flags and the outlier class (EDA sections 3.2, 4.2 and 5)."""
-    p99 = df.selectExpr("percentile(price, 0.99) AS p99").first()["p99"]  # exact, NULL if no prices
+    p99 = df.selectExpr("percentile(price, 0.99) AS p99").first()["p99"]
     extreme = f"WHEN price > {p99} THEN 'extreme' " if p99 is not None else ""
     price_class = (
         "CASE WHEN price IS NULL THEN 'missing' "

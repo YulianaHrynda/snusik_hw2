@@ -1,6 +1,3 @@
-# Runs the same city pipeline for every city in the `cities` list (for_each, one city at a time:
-# the cities write to the same Delta tables, so sequential runs avoid commit conflicts on
-# first-time table creation).
 resources:
   jobs:
     airbnb_etl:

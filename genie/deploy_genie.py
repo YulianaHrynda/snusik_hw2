@@ -1,12 +1,4 @@
 #!/usr/bin/env python
-"""Create or update the Genie space described in genie/space.yml.
-
-    python genie/deploy_genie.py                 # create (or update the space id in genie/.space_id)
-    python genie/deploy_genie.py --dry-run       # print the serialized space only
-    python genie/deploy_genie.py --ask "What is the median price of entire homes in City A?"
-
-Uses the Databricks CLI (`databricks genie ...`) and your default CLI profile.
-"""
 from __future__ import annotations
 
 import argparse
@@ -23,7 +15,6 @@ SPACE_ID_FILE = os.path.join(HERE, ".space_id")
 
 
 def _id(*parts: str) -> str:
-    """Stable 32-hex ids so re-deploys update the same instructions/examples."""
     return hashlib.md5("|".join(parts).encode()).hexdigest()
 
 
@@ -52,7 +43,6 @@ def serialized_space(cfg: dict) -> dict:
             ],
         },
     }
-    # the API requires every list of id-carrying items to be sorted by id
     space["config"]["sample_questions"].sort(key=lambda x: x["id"])
     for key in ("text_instructions", "example_question_sqls", "join_specs"):
         space["instructions"][key].sort(key=lambda x: x["id"])

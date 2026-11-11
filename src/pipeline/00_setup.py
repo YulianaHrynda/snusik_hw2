@@ -9,7 +9,7 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.abspath(".."))  # make src/airbnb importable
+sys.path.insert(0, os.path.abspath(".."))
 
 from airbnb.config import is_databricks, lakehouse_from, read_params
 
@@ -24,7 +24,7 @@ for layer in ("bronze", "silver", "gold"):
 if is_databricks():
     spark.sql(f"CREATE VOLUME IF NOT EXISTS {lh.schema('bronze')}.raw COMMENT 'Inside Airbnb files as downloaded'")
     spark.sql(f"CREATE VOLUME IF NOT EXISTS {lh.schema('gold')}.artifacts COMMENT 'Fitted price models'")
-else:  # local run: plain folders stand in for the volumes
+else:
     os.makedirs(lh.raw_root, exist_ok=True)
     os.makedirs(lh.artifacts_root, exist_ok=True)
 

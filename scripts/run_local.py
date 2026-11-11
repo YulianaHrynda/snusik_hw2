@@ -1,17 +1,4 @@
 #!/usr/bin/env python
-"""Run this repo's Databricks notebooks on a local Spark 4 + Delta session.
-
-The notebooks are executed unchanged: a tiny shim provides `spark`, `dbutils.widgets`,
-`dbutils.notebook.exit` and `display`. Tables go to the local metastore under catalog
-`spark_catalog`, the landing zone is ./data/raw and model artifacts go to
-./.local_lakehouse/artifacts. The presets mirror the jobs in resources/*.yml.
-
-    python scripts/run_local.py city-pipeline --city boston
-    python scripts/run_local.py train --train-cities boston,jersey-city --model-version v1
-    python scripts/run_local.py onboard --city new-york-city --model-version v1
-    python scripts/run_local.py notebook src/pipeline/02_build_silver.py --param city=boston
-    python scripts/run_local.py sql "SELECT * FROM spark_catalog.airbnb_gold.city_metrics"
-"""
 from __future__ import annotations
 
 import argparse
@@ -83,7 +70,7 @@ def display(obj, *args, **kwargs):
 
 def spark_session():
     os.environ.setdefault("JAVA_HOME", "/opt/homebrew/opt/openjdk@17")
-    os.environ["PYSPARK_PYTHON"] = sys.executable  # workers must use the driver's Python
+    os.environ["PYSPARK_PYTHON"] = sys.executable
     os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
     from delta import configure_spark_with_delta_pip
     from pyspark.sql import SparkSession
@@ -98,7 +85,7 @@ def spark_session():
         .config("spark.hadoop.javax.jdo.option.ConnectionURL",
                 f"jdbc:derby:;databaseName={os.path.join(LOCAL, 'metastore_db')};create=true")
         .config("spark.driver.extraJavaOptions", f"-Dderby.system.home={LOCAL}")
-        .config("spark.sql.ansi.enabled", "true")  # Databricks serverless runs in ANSI mode
+        .config("spark.sql.ansi.enabled", "true")
         .config("spark.sql.session.timeZone", "UTC")
         .config("spark.driver.memory", "4g")
         .config("spark.sql.shuffle.partitions", "8")
@@ -111,7 +98,6 @@ def spark_session():
 
 
 def run_notebook(spark, path: str, params: dict):
-    """Execute a Databricks-source notebook (.py) with the notebook's folder as working dir."""
     path = os.path.join(REPO, path) if not os.path.isabs(path) else path
     with open(path, encoding="utf-8") as f:
         source = f.read()

@@ -1,4 +1,3 @@
-# ETL for the training cities, then train + evaluate the price model and save it as `model_version`.
 resources:
   jobs:
     airbnb_train_price_model:
@@ -10,11 +9,11 @@ resources:
         - name: model_version
           default: v2
         - name: feature_set
-          default: comps       # "v1" reproduces the week-1 model
+          default: comps
         - name: model_name
-          default: auto        # auto = lowest 5-fold CV MAE on the training split
+          default: auto
         - name: overwrite
-          default: "false"     # model versions are immutable unless explicitly overwritten
+          default: "false"
         - name: catalog
           default: ${var.catalog}
       tasks:
